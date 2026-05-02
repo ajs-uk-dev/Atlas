@@ -76,6 +76,20 @@ public class ValidationInheritanceTests
     }
 
     [Fact]
+    public void AssertConfigurationIsValid_MemberListNoneWithBadInclude_StillValidatesInheritance()
+    {
+        // Even MemberList.None maps must have their Include declarations validated.
+        var config = new MapperConfiguration(c =>
+        {
+            c.CreateMap<ViAnimal, ViAnimalDto>(MemberList.None)
+                .Include<ViDog, ViDogDto>();
+            // ViDog -> ViDogDto NOT registered.
+        });
+        var ex = Assert.Throws<AtlasConfigurationException>(() => config.AssertConfigurationIsValid());
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("Include declares", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AssertConfigurationIsValid_AggregatesAllInheritanceErrors_NotJustFirst()
     {
         var config = new MapperConfiguration(c =>

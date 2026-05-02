@@ -119,7 +119,6 @@ See `docs/Atlas-Design-Inheritance.md` for the full design.
 
 Each of these has its own design doc to be written separately:
 
-- Inheritance / runtime polymorphism (`Include`, `IncludeBase`)
 - Enum mapping surface
 - Reverse mapping / unflattening
 - Before/after hooks, value transformers

@@ -14,10 +14,10 @@ internal static class ConfigurationValidator
         var errors = new List<ConfigurationError>();
         foreach (var tm in registry.AllTypeMaps)
         {
-            if (tm.MemberList == MemberList.None) continue;
-
             // Inheritance rules (design §7.3).
             ValidateInheritance(tm, registry, errors);
+
+            if (tm.MemberList == MemberList.None) continue;
 
             if (tm.CustomConverter is not null) continue;
 
