@@ -31,6 +31,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         var member = new MemberConfigurationExpression<TSource, TDestination, TMember>();
         memberOptions(member);
         member.ApplyTo(pm);
+        pm.IsExplicit = true;
         TypeMap.PropertyMaps.Add(pm);
         return this;
     }
@@ -48,6 +49,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         var member = new MemberConfigurationExpression<TSource, TDestination, object?>();
         paramOptions(member);
         member.ApplyTo(pm);
+        pm.IsExplicit = true;
         TypeMap.PropertyMaps.Add(pm);
         return this;
     }
