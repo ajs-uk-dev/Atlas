@@ -45,7 +45,10 @@ public interface IMappingExpression<TSource, TDestination>
     /// <c>.Include&lt;TSource, TDestination&gt;()</c> on the base map — useful when the base
     /// map lives in a different profile.
     /// </summary>
-    IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>()
-        where TBaseSource : TSource
-        where TBaseDestination : TDestination;
+    /// <remarks>
+    /// The C# type system cannot express the constraint that TSource derives from
+    /// TBaseSource (CS0699 — outer type parameters can't be constrained from method where
+    /// clauses). The validator catches misuse at config-build time instead.
+    /// </remarks>
+    IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>();
 }
