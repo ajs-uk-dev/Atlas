@@ -80,6 +80,8 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
     }
 
     public IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>()
+        where TBaseSource : TSource
+        where TBaseDestination : TDestination
     {
         TypeMap.EnsureMutable();
         var pair = new TypePair(typeof(TBaseSource), typeof(TBaseDestination));

@@ -45,5 +45,7 @@ public interface IMappingExpression<TSource, TDestination>
     /// <c>.Include&lt;TSource, TDestination&gt;()</c> on the base map — useful when the base
     /// map lives in a different profile.
     /// </summary>
-    IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>();
+    IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>()
+        where TBaseSource : TSource
+        where TBaseDestination : TDestination;
 }
