@@ -67,16 +67,9 @@ internal static class ProjectionValidator
             var leaf = pm.SourcePath.Members[^1].PropertyType;
             var target = pm.DestinationType;
             if (leaf == target || target.IsAssignableFrom(leaf)) continue;
-            if (HasImplicitNumericConversion(leaf, target)) continue;
+            if (NumericConversions.HasImplicitConversion(leaf, target)) continue;
 
-            if (IsDictionary(leaf) && IsDictionary(target))
-            {
-                var srcArgs = leaf.GetGenericArguments();
-                var dstArgs = target.GetGenericArguments();
-                Walk(new TypePair(srcArgs[0], dstArgs[0]), depth + 1, registry, visited, diagnostics, maxDepth);
-                Walk(new TypePair(srcArgs[1], dstArgs[1]), depth + 1, registry, visited, diagnostics, maxDepth);
-                continue;
-            }
+            // Dictionary<,> destinations are out-of-scope for v1; the validator does not special-case them.
             if (IsCollection(leaf) && IsCollection(target))
             {
                 Walk(new TypePair(GetEnumerableElementType(leaf)!, GetEnumerableElementType(target)!),
@@ -91,9 +84,6 @@ internal static class ProjectionValidator
     private static bool IsCollection(Type t) =>
         t != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(t);
 
-    private static bool IsDictionary(Type t) =>
-        t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>);
-
     private static Type? GetEnumerableElementType(Type t)
     {
         if (t.IsArray) return t.GetElementType();
@@ -101,32 +91,5 @@ internal static class ProjectionValidator
             if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
                 return i.GetGenericArguments()[0];
         return null;
-    }
-
-    private static bool HasImplicitNumericConversion(Type src, Type dst)
-    {
-        // Unwrap Nullable<T> on both sides: int? -> long? is valid if int -> long is valid.
-        var srcUnderlying = Nullable.GetUnderlyingType(src);
-        var dstUnderlying = Nullable.GetUnderlyingType(dst);
-        if (srcUnderlying is not null || dstUnderlying is not null)
-        {
-            if (srcUnderlying is null || dstUnderlying is null) return false;
-            return HasImplicitNumericConversion(srcUnderlying, dstUnderlying);
-        }
-
-        return (src, dst) switch
-        {
-            _ when src == typeof(sbyte) => dst == typeof(short) || dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(byte) => dst == typeof(short) || dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(short) => dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ushort) => dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(int) => dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(uint) => dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(long) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ulong) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(float) => dst == typeof(double),
-            _ when src == typeof(char) => dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ => false,
-        };
     }
 }

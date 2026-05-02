@@ -84,7 +84,7 @@ internal static class ConfigurationValidator
     private static bool IsAssignmentLegal(Type src, Type dst, MapperRegistry registry)
     {
         if (dst.IsAssignableFrom(src)) return true;
-        if (HasImplicitNumericConversion(src, dst)) return true;
+        if (NumericConversions.HasImplicitConversion(src, dst)) return true;
         if (registry.GetTypeMap(new TypePair(src, dst)) is not null) return true;
         if (IsEnumerable(src) && IsEnumerable(dst)) return true;
         return false;
@@ -100,20 +100,4 @@ internal static class ConfigurationValidator
 
     private static bool IsEnumerable(Type t) =>
         t != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(t);
-
-    private static bool HasImplicitNumericConversion(Type src, Type dst) =>
-        (src, dst) switch
-        {
-            _ when src == typeof(sbyte) => dst == typeof(short) || dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(byte) => dst == typeof(short) || dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(short) => dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ushort) => dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(int) => dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(uint) => dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(long) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ulong) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(float) => dst == typeof(double),
-            _ when src == typeof(char) => dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ => false,
-        };
 }

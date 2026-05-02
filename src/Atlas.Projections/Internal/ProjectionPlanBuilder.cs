@@ -109,7 +109,7 @@ internal static class ProjectionPlanBuilder
             return source;
         }
         if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
-        if (HasImplicitNumericConversion(source.Type, targetType))
+        if (NumericConversions.HasImplicitConversion(source.Type, targetType))
             return Expression.Convert(source, targetType);
 
         if (IsCollection(source.Type) && IsCollection(targetType))
@@ -252,30 +252,4 @@ internal static class ProjectionPlanBuilder
         return null;
     }
 
-    private static bool HasImplicitNumericConversion(Type src, Type dst)
-    {
-        // Unwrap Nullable<T> on both sides: int? -> long? is valid if int -> long is valid.
-        var srcUnderlying = Nullable.GetUnderlyingType(src);
-        var dstUnderlying = Nullable.GetUnderlyingType(dst);
-        if (srcUnderlying is not null || dstUnderlying is not null)
-        {
-            if (srcUnderlying is null || dstUnderlying is null) return false;
-            return HasImplicitNumericConversion(srcUnderlying, dstUnderlying);
-        }
-
-        return (src, dst) switch
-        {
-            _ when src == typeof(sbyte) => dst == typeof(short) || dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(byte) => dst == typeof(short) || dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(short) => dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ushort) => dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(int) => dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(uint) => dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(long) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ulong) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(float) => dst == typeof(double),
-            _ when src == typeof(char) => dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ => false,
-        };
-    }
 }
