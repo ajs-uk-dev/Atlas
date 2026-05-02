@@ -110,7 +110,6 @@ internal static class ProjectionValidator
         var dstUnderlying = Nullable.GetUnderlyingType(dst);
         if (srcUnderlying is not null || dstUnderlying is not null)
         {
-            // Both must be nullable (or one unwrapped is the other) for the widening to hold.
             if (srcUnderlying is null || dstUnderlying is null) return false;
             return HasImplicitNumericConversion(srcUnderlying, dstUnderlying);
         }
