@@ -92,6 +92,28 @@ public class MapperConfigurationInheritanceTests
     }
 
     [Fact]
+    public void Include_TwoLevels_ReverseRegistrationOrder_AllInheritExplicitConfig()
+    {
+        // Critical regression: when only Include is used (no IncludeBase) and registration
+        // order is reverse-of-inheritance, the topological sort must still process A before
+        // B before C so that A's explicit config flows down through both levels.
+        var config = new MapperConfiguration(c =>
+        {
+            c.CreateMap<MciBeagle, MciBeagleDto>();                              // grandchild first
+            c.CreateMap<MciDog, MciDogDto>().Include<MciBeagle, MciBeagleDto>();  // child second
+            c.CreateMap<MciAnimal, MciAnimalDto>()
+                .ForMember(d => d.Name, o => o.MapFrom(s => "from-base-" + s.Name))
+                .Include<MciDog, MciDogDto>();                                    // base last
+        });
+        var beagleTm = config.Internal_Registry.GetTypeMap(new TypePair(typeof(MciBeagle), typeof(MciBeagleDto)))!;
+        // Beagle should have Name binding inherited from Animal (via Dog).
+        var nameBinding = beagleTm.PropertyMaps.SingleOrDefault(p => p.Name == nameof(MciAnimalDto.Name));
+        Assert.NotNull(nameBinding);
+        Assert.True(nameBinding.IsExplicit);
+        Assert.NotNull(nameBinding.CustomExpression); // base used MapFrom expression
+    }
+
+    [Fact]
     public void Include_DerivedMapNotRegistered_FailsValidation()
     {
         var config = new MapperConfiguration(c =>
