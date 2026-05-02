@@ -21,6 +21,9 @@ internal static class ConfigurationValidator
                 ValidateDestination(tm, registry, errors);
             else
                 ValidateSource(tm, registry, errors);
+
+            // Inheritance rules (design §7.3).
+            ValidateInheritance(tm, registry, errors);
         }
 
         if (errors.Count > 0)
@@ -100,4 +103,49 @@ internal static class ConfigurationValidator
 
     private static bool IsEnumerable(Type t) =>
         t != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(t);
+
+    private static void ValidateInheritance(TypeMap tm, MapperRegistry registry, List<ConfigurationError> errors)
+    {
+        // Rule 1: abstract type without any Include is unreachable.
+        if ((tm.SourceType.IsAbstract || tm.DestinationType.IsAbstract) && tm.IncludedDerived.Count == 0)
+        {
+            errors.Add(new ConfigurationError(
+                tm.SourceType, tm.DestinationType, "(map)",
+                "Abstract type used without any Include — map is unreachable."));
+        }
+
+        // Rule 2: each Include must point at a registered map.
+        foreach (var derivedPair in tm.IncludedDerived)
+        {
+            if (registry.GetTypeMap(derivedPair) is null)
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(include)",
+                    $"Include declares {derivedPair.Source.Name} -> {derivedPair.Destination.Name} but no such map is registered."));
+            }
+        }
+
+        // Rule 3: each Include's types must derive from the base map's types.
+        foreach (var derivedPair in tm.IncludedDerived)
+        {
+            if (!tm.SourceType.IsAssignableFrom(derivedPair.Source) ||
+                !tm.DestinationType.IsAssignableFrom(derivedPair.Destination))
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(include)",
+                    $"Include's source/destination type ({derivedPair.Source.Name} -> {derivedPair.Destination.Name}) does not derive from the base map's source/destination type."));
+            }
+        }
+
+        // Rule 4: each IncludeBase must point at a registered map.
+        foreach (var basePair in tm.IncludedBases)
+        {
+            if (registry.GetTypeMap(basePair) is null)
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(include-base)",
+                    $"IncludeBase references {basePair.Source.Name} -> {basePair.Destination.Name} but no such map is registered."));
+            }
+        }
+    }
 }
