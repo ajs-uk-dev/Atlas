@@ -15,15 +15,16 @@ internal static class ConfigurationValidator
         foreach (var tm in registry.AllTypeMaps)
         {
             if (tm.MemberList == MemberList.None) continue;
+
+            // Inheritance rules (design §7.3).
+            ValidateInheritance(tm, registry, errors);
+
             if (tm.CustomConverter is not null) continue;
 
             if (tm.MemberList == MemberList.Destination)
                 ValidateDestination(tm, registry, errors);
             else
                 ValidateSource(tm, registry, errors);
-
-            // Inheritance rules (design §7.3).
-            ValidateInheritance(tm, registry, errors);
         }
 
         if (errors.Count > 0)

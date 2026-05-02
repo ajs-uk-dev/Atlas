@@ -60,6 +60,22 @@ public class ValidationInheritanceTests
     }
 
     [Fact]
+    public void AssertConfigurationIsValid_CustomConverterWithInclude_StillValidatesInheritance()
+    {
+        // Even with ConvertUsing on the base, an Include pointing at an unregistered map
+        // should be reported by the validator.
+        var config = new MapperConfiguration(c =>
+        {
+            var mapping = c.CreateMap<ViAnimal, ViAnimalDto>();
+            mapping.ConvertUsing(s => new ViAnimalDto { Name = s.Name });
+            mapping.Include<ViDog, ViDogDto>();
+            // ViDog -> ViDogDto NOT registered.
+        });
+        var ex = Assert.Throws<AtlasConfigurationException>(() => config.AssertConfigurationIsValid());
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("Include declares", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AssertConfigurationIsValid_AggregatesAllInheritanceErrors_NotJustFirst()
     {
         var config = new MapperConfiguration(c =>
