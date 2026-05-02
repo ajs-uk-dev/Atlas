@@ -67,6 +67,35 @@ The configuration is validated eagerly at the call site; non-projectable constru
 
 See `docs/Atlas-Design-ProjectTo.md` for the full design.
 
+## Inheritance & polymorphism
+
+Atlas dispatches on runtime type when you declare derived maps via `Include` (on the base map) or `IncludeBase` (on the derived map):
+
+```csharp
+cfg.CreateMap<Animal, AnimalDto>()
+   .Include<Dog, DogDto>()
+   .Include<Cat, CatDto>();
+cfg.CreateMap<Dog, DogDto>();
+cfg.CreateMap<Cat, CatDto>();
+
+Animal a = new Dog { Name = "rex", Breed = "Beagle" };
+AnimalDto dto = mapper.Map<Animal, AnimalDto>(a);
+// dto is actually a DogDto.
+```
+
+Polymorphic collections work transparently — `List<Animal>` containing mixed Dog/Cat instances maps element-by-element to a `List<AnimalDto>` containing DogDto/CatDto.
+
+Member configuration on the base map flows to derived maps with the standard precedence:
+1. Derived's explicit `MapFrom` / `Ignore` wins
+2. Base's explicit `MapFrom` / `Ignore` is inherited
+3. Convention-based match on the derived map fills the rest
+
+**Foot-gun**: an explicit `Ignore` on the base **overrides** convention on the derived. If you ignore `Animal.Name` on the base map, Dog will also ignore `Name` even if Dog has a matching `Name` property by convention. This is the standard semantics (consistent with AutoMapper) but commonly catches people out — keep it in mind when refactoring inheritance.
+
+**ProjectTo limitation (v1)**: today's `Atlas.Projections` package is unaware of `Include` declarations. A `query.ProjectTo<AnimalDto>(cfg)` against a polymorphic `DbSet<Animal>` projects every row as `AnimalDto` — derived rows lose their derived shape silently. A future v3 design will lift this limitation.
+
+See `docs/Atlas-Design-Inheritance.md` for the full design.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -125,7 +154,7 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 90.95% | 75.49% | Met (line ≥ 90%, branch close to ≥ 80% target). The `HasImplicitNumericConversion` switch was consolidated into `Atlas.Internal.NumericConversions` and is now exercised once via `[Theory]`. |
+| `Atlas` | 93.7% | 77.9% | Met. The `HasImplicitNumericConversion` switch was consolidated into `Atlas.Internal.NumericConversions` and is now exercised once via `[Theory]`. Inheritance support adds the `InheritanceMerger` and `ValidateInheritance` paths. |
 | `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
 | `Atlas.Projections` | 93.91% | 83.57% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
 
