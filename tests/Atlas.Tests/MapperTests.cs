@@ -193,6 +193,22 @@ public class MapperTests
         Assert.Equal("new", existing.Name);
         Assert.Equal("stay", existing.Untouched);
     }
+
+    [Fact]
+    public void Map_NullableIntToNullableLong_Widens()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtNullableSrc, MtNullableDst>());
+        var dst = mapper.Map<MtNullableSrc, MtNullableDst>(new MtNullableSrc { Value = 42 });
+        Assert.Equal(42L, dst.Value);
+    }
+
+    [Fact]
+    public void Map_NullableIntToNullableLong_NullPreserved()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtNullableSrc, MtNullableDst>());
+        var dst = mapper.Map<MtNullableSrc, MtNullableDst>(new MtNullableSrc { Value = null });
+        Assert.Null(dst.Value);
+    }
 }
 
 // ---- Test fixtures ----
@@ -218,3 +234,6 @@ public class MtRecordDst { public MtRecordDst(string displayName) { DisplayName 
 
 public class MtUpdSrc { public int Id { get; set; } public string Name { get; set; } = ""; }
 public class MtUpdDst { public int Id { get; set; } public string Name { get; set; } = ""; public string Untouched { get; set; } = ""; }
+
+public class MtNullableSrc { public int? Value { get; set; } }
+public class MtNullableDst { public long? Value { get; set; } }

@@ -213,7 +213,7 @@ internal static class ExecutionPlanBuilder
         if (source.Type == targetType) return source;
         if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
 
-        if (HasImplicitNumericConversion(source.Type, targetType))
+        if (NumericConversions.HasImplicitConversion(source.Type, targetType))
             return Expression.Convert(source, targetType);
 
         if (IsCollection(source.Type) && IsCollection(targetType))
@@ -331,22 +331,6 @@ internal static class ExecutionPlanBuilder
             i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
         return iface?.GetGenericArguments()[0];
     }
-
-    private static bool HasImplicitNumericConversion(Type src, Type dst) =>
-        (src, dst) switch
-        {
-            _ when src == typeof(sbyte) => dst == typeof(short) || dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(byte) => dst == typeof(short) || dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(short) => dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ushort) => dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(int) => dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(uint) => dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(long) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(ulong) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ when src == typeof(float) => dst == typeof(double),
-            _ when src == typeof(char) => dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
-            _ => false,
-        };
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
     {

@@ -2,9 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/Atlas.Extensions.DependencyInjection/Atlas.Extensions.DependencyInjection.csproj" />
     <Project Path="src/Atlas/Atlas.csproj" />
+    <Project Path="src/Atlas.Projections/Atlas.Projections.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Atlas.Benchmarks/Atlas.Benchmarks.csproj" />
     <Project Path="tests/Atlas.Tests/Atlas.Tests.csproj" />
+    <Project Path="tests/Atlas.Projections.Tests/Atlas.Projections.Tests.csproj" />
+    <Project Path="tests/Atlas.Projections.Tests.EFCore/Atlas.Projections.Tests.EFCore.csproj" />
   </Folder>
 </Solution>

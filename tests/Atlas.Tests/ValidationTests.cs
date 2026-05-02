@@ -100,6 +100,13 @@ public class ValidationTests
         Assert.Contains(nameof(VtTwoMissingDst.Missing1), ex.Message);
         Assert.Contains(nameof(VtTwoMissingDst.Missing2), ex.Message);
     }
+
+    [Fact]
+    public void AssertConfigurationIsValid_NullableNumericWidening_PassesValidation()
+    {
+        var config = new MapperConfiguration(c => c.CreateMap<VtNullableIntSrc, VtNullableLongDst>());
+        config.AssertConfigurationIsValid();
+    }
 }
 
 // ---- Test fixtures ----
@@ -128,3 +135,6 @@ public class VtIntDst { public int Value { get; set; } }
 
 public class VtIntSrc { public int Count { get; set; } }
 public class VtLongDst { public long Count { get; set; } }
+
+public class VtNullableIntSrc { public int? Count { get; set; } }
+public class VtNullableLongDst { public long? Count { get; set; } }

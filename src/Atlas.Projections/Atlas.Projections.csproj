@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Atlas.Projections</PackageId>
+    <Description>LINQ-translatable projection (ProjectTo) for the Atlas mapper.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Atlas\Atlas.csproj" />
+    <InternalsVisibleTo Include="Atlas.Projections.Tests" />
+  </ItemGroup>
+</Project>
