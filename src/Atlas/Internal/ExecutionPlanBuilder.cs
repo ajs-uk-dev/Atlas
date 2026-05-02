@@ -11,6 +11,17 @@ internal static class ExecutionPlanBuilder
 {
     public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
     {
+        // Per-base body (existing v1 codegen).
+        var baseLambda = BuildBaseBody(typeMap, registry);
+
+        if (typeMap.IncludedDerived.Count == 0)
+            return baseLambda;
+
+        return BuildWithInheritanceDispatch(baseLambda, typeMap, registry);
+    }
+
+    private static LambdaExpression BuildBaseBody(TypeMap typeMap, MapperRegistry registry)
+    {
         if (typeMap.CustomConverter is not null)
             return BuildConverterLambda(typeMap);
 
@@ -21,6 +32,58 @@ internal static class ExecutionPlanBuilder
             return BuildDictionaryLambda(typeMap, registry);
 
         return BuildPocoLambda(typeMap, registry);
+    }
+
+    private static LambdaExpression BuildWithInheritanceDispatch(
+        LambdaExpression baseLambda,
+        TypeMap typeMap,
+        MapperRegistry registry)
+    {
+        var srcParam = baseLambda.Parameters[0];
+
+        // Inline the base body (substitute baseLambda's parameter for our srcParam).
+        // baseLambda.Parameters[0] IS srcParam after our wrap, so the body already references it.
+        // No replacement needed — we use baseLambda.Body directly as the fall-through.
+        Expression body = baseLambda.Body;
+
+        // IncludedDerived is sorted most-derived-first by InheritanceMerger. We iterate in
+        // reverse (least-derived-first) so that each new wrap becomes the outer Condition,
+        // putting the most-derived type check outermost (evaluated first at runtime).
+        foreach (var derivedPair in ((IEnumerable<TypePair>)typeMap.IncludedDerived).Reverse())
+        {
+            var derivedSrc = derivedPair.Source;
+            var derivedDst = derivedPair.Destination;
+
+            // src is TDerivedSrc
+            var typeIsExpr = Expression.TypeIs(srcParam, derivedSrc);
+
+            // MappingInvoker.Invoke<TDerivedSrc, TDerivedDst>(registry, (TDerivedSrc)src)
+            var method = typeof(MappingInvoker)
+                .GetMethod(nameof(MappingInvoker.Invoke), System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
+                .MakeGenericMethod(derivedSrc, derivedDst);
+            var invoke = Expression.Call(
+                method,
+                Expression.Constant(registry),
+                Expression.Convert(srcParam, derivedSrc));
+
+            // Cast to base destination.
+            var upcast = Expression.Convert(invoke, typeMap.DestinationType);
+
+            // Conditional: src is TDerivedSrc ? upcast : body
+            body = Expression.Condition(typeIsExpr, upcast, body);
+        }
+
+        // Null guard outside the dispatch chain (matches v1 idiom).
+        if (typeMap.SourceType.IsClass)
+        {
+            body = Expression.Condition(
+                Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType)),
+                Expression.Default(typeMap.DestinationType),
+                body);
+        }
+
+        var funcType = typeof(Func<,>).MakeGenericType(typeMap.SourceType, typeMap.DestinationType);
+        return Expression.Lambda(funcType, body, srcParam);
     }
 
     /// <summary>Build the update-in-place lambda for the given type map.</summary>
