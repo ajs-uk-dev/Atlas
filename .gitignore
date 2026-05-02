@@ -432,4 +432,4 @@ FodyWeavers.xsd
 .claude/
 
 # ReportGenerator HTML / text output
-coverage/
+coverage*/

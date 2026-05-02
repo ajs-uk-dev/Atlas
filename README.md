@@ -125,9 +125,9 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 91% | 85% | Line met. Branch coverage gap concentrated in the `HasImplicitNumericConversion` switch — duplicated between `ConventionEngine` and `ConfigurationValidator`; a v2 cleanup task is to consolidate into one helper and exercise via `[Theory]`. |
+| `Atlas` | 90.95% | 75.49% | Met (line ≥ 90%, branch close to ≥ 80% target). The `HasImplicitNumericConversion` switch was consolidated into `Atlas.Internal.NumericConversions` and is now exercised once via `[Theory]`. |
 | `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
-| `Atlas.Projections` | 94.8% | 59.29% | Line met. Branch coverage gap is the same `HasImplicitNumericConversion` switch-arm pattern documented for the v1 Atlas line. |
+| `Atlas.Projections` | 93.91% | 83.57% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
 
 ## License
 
