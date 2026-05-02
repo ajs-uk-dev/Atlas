@@ -427,3 +427,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Claude Code per-machine state
+.claude/
+
+# ReportGenerator HTML / text output
+coverage/

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Atlas</PackageId>
+    <Description>A fluent, high-performance object-to-object mapper for .NET.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atlas.Tests" />
+    <InternalsVisibleTo Include="Atlas.Extensions.DependencyInjection" />
+  </ItemGroup>
+</Project>

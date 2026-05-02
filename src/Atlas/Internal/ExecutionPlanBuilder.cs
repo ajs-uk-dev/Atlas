@@ -1,0 +1,356 @@
+using System.Linq.Expressions;
+using System.Reflection;
+
+namespace Atlas.Internal;
+
+/// <summary>
+/// Builds the <see cref="LambdaExpression"/> that materializes a <see cref="TypeMap"/> at runtime.
+/// Algorithm per design §7.
+/// </summary>
+internal static class ExecutionPlanBuilder
+{
+    public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
+    {
+        if (typeMap.CustomConverter is not null)
+            return BuildConverterLambda(typeMap);
+
+        if (IsCollection(typeMap.SourceType) && IsCollection(typeMap.DestinationType))
+            return BuildCollectionLambda(typeMap, registry);
+
+        if (IsDictionary(typeMap.SourceType) && IsDictionary(typeMap.DestinationType))
+            return BuildDictionaryLambda(typeMap, registry);
+
+        return BuildPocoLambda(typeMap, registry);
+    }
+
+    /// <summary>Build the update-in-place lambda for the given type map.</summary>
+    public static LambdaExpression BuildUpdate(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var destParam = Expression.Parameter(typeMap.DestinationType, "dest");
+
+        var statements = new List<Expression>();
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.Ignored) continue;
+            if (pm.DestinationProperty is null) continue;     // ctor params skipped on update
+
+            var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
+            if (sourceExpr is null) continue;
+
+            statements.Add(Expression.Assign(
+                Expression.Property(destParam, pm.DestinationProperty),
+                sourceExpr));
+        }
+
+        Expression body = statements.Count > 0
+            ? Expression.Block(statements)
+            : Expression.Empty();
+
+        if (typeMap.SourceType.IsClass)
+        {
+            body = Expression.IfThen(
+                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType))),
+                body);
+        }
+
+        return Expression.Lambda(body, srcParam, destParam);
+    }
+
+    // ---- POCO ----
+
+    private static LambdaExpression BuildPocoLambda(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcType = typeMap.SourceType;
+        var dstType = typeMap.DestinationType;
+        var srcParam = Expression.Parameter(srcType, "src");
+        var destVar = Expression.Variable(dstType, "dest");
+
+        var (ctor, ctorParamMaps, propertyMaps) = ClassifyBindings(typeMap);
+
+        Expression newDest;
+        if (ctor.GetParameters().Length == 0)
+        {
+            newDest = Expression.New(ctor);
+        }
+        else
+        {
+            var args = ctor.GetParameters().Select(p =>
+            {
+                var pm = ctorParamMaps.FirstOrDefault(m =>
+                    string.Equals(m.Name, p.Name, StringComparison.OrdinalIgnoreCase));
+                if (pm is null)
+                {
+                    if (p.HasDefaultValue) return Expression.Constant(p.DefaultValue, p.ParameterType);
+                    return (Expression)Expression.Default(p.ParameterType);
+                }
+                return BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
+                    ?? Expression.Default(p.ParameterType);
+            }).ToArray();
+            newDest = Expression.New(ctor, args);
+        }
+
+        var statements = new List<Expression>
+        {
+            Expression.Assign(destVar, newDest),
+        };
+
+        foreach (var pm in propertyMaps)
+        {
+            if (pm.Ignored) continue;
+            if (pm.DestinationProperty is null) continue;
+
+            var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
+            if (sourceExpr is null) continue;
+
+            statements.Add(Expression.Assign(
+                Expression.Property(destVar, pm.DestinationProperty),
+                sourceExpr));
+        }
+
+        statements.Add(destVar);
+
+        Expression body = Expression.Block(new[] { destVar }, statements);
+
+        if (srcType.IsClass)
+        {
+            body = Expression.Condition(
+                Expression.ReferenceEqual(srcParam, Expression.Constant(null, srcType)),
+                Expression.Default(dstType),
+                body);
+        }
+
+        return Expression.Lambda(body, srcParam);
+    }
+
+    private static (ConstructorInfo ctor,
+                    IReadOnlyList<PropertyMap> ctorParamMaps,
+                    IReadOnlyList<PropertyMap> propertyMaps)
+        ClassifyBindings(TypeMap typeMap)
+    {
+        var dstType = typeMap.DestinationType;
+        var parameterless = dstType.GetConstructor(Type.EmptyTypes);
+        ConstructorInfo ctor;
+        if (parameterless is { IsPublic: true })
+        {
+            ctor = parameterless;
+        }
+        else
+        {
+            ctor = dstType.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                .OrderByDescending(c => c.GetParameters().Length)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException(
+                    $"Type {dstType.Name} has no public constructor.");
+        }
+
+        var ctorParamNames = new HashSet<string>(
+            ctor.GetParameters().Select(p => p.Name ?? ""),
+            StringComparer.OrdinalIgnoreCase);
+
+        var ctorParamMaps = typeMap.PropertyMaps
+            .Where(p => p.DestinationCtorParameter is not null && ctorParamNames.Contains(p.Name))
+            .ToList();
+        var propertyMaps = typeMap.PropertyMaps
+            .Where(p => p.DestinationProperty is not null)
+            .ToList();
+
+        return (ctor, ctorParamMaps, propertyMaps);
+    }
+
+    // ---- Source expression generation ----
+
+    private static Expression? BuildSourceExpression(
+        PropertyMap pm,
+        ParameterExpression srcParam,
+        MapperRegistry registry,
+        Type targetType)
+    {
+        if (pm.HasConstant)
+            return Expression.Constant(pm.ConstantValue, targetType);
+
+        if (pm.CustomExpression is not null)
+        {
+            // Substitute the lambda's parameter with our srcParam.
+            var rebound = new ParameterReplacer(pm.CustomExpression.Parameters[0], srcParam)
+                .Visit(pm.CustomExpression.Body);
+            return ConvertOrMap(rebound!, targetType, registry);
+        }
+
+        if (pm.SourcePath is not null)
+        {
+            var pathExpr = BuildPathAccess(srcParam, pm.SourcePath.Members);
+            return ConvertOrMap(pathExpr, targetType, registry);
+        }
+
+        return null;
+    }
+
+    private static Expression BuildPathAccess(Expression source, IReadOnlyList<PropertyInfo> path)
+    {
+        Expression current = source;
+        foreach (var step in path)
+        {
+            var stepProp = Expression.Property(current, step);
+            if (current.Type.IsClass)
+            {
+                current = Expression.Condition(
+                    Expression.ReferenceEqual(current, Expression.Constant(null, current.Type)),
+                    Expression.Default(stepProp.Type),
+                    stepProp);
+            }
+            else
+            {
+                current = stepProp;
+            }
+        }
+        return current;
+    }
+
+    private static Expression ConvertOrMap(Expression source, Type targetType, MapperRegistry registry)
+    {
+        if (source.Type == targetType) return source;
+        if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
+
+        if (HasImplicitNumericConversion(source.Type, targetType))
+            return Expression.Convert(source, targetType);
+
+        if (IsCollection(source.Type) && IsCollection(targetType))
+            return BuildCollectionInvoke(source, targetType, registry);
+
+        // Fallback: nested map invocation
+        return BuildNestedInvoke(source, targetType, registry);
+    }
+
+    private static Expression BuildNestedInvoke(Expression source, Type destType, MapperRegistry registry)
+    {
+        var method = typeof(MappingInvoker)
+            .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(source.Type, destType);
+        return Expression.Call(method, Expression.Constant(registry), source);
+    }
+
+    private static Expression BuildCollectionInvoke(Expression source, Type destType, MapperRegistry registry)
+    {
+        var srcElement = GetEnumerableElementType(source.Type)!;
+        var dstElement = GetEnumerableElementType(destType)!;
+
+        var helperName = destType.IsArray
+            ? nameof(MappingInvoker.InvokeToArray)
+            : nameof(MappingInvoker.InvokeToList);
+
+        var method = typeof(MappingInvoker)
+            .GetMethod(helperName, BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(srcElement, dstElement);
+
+        var sourceAsEnumerable = source.Type.IsAssignableTo(typeof(IEnumerable<>).MakeGenericType(srcElement))
+            ? source
+            : Expression.Convert(source, typeof(IEnumerable<>).MakeGenericType(srcElement));
+
+        return Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable);
+    }
+
+    // ---- Custom converter ----
+
+    private static LambdaExpression BuildConverterLambda(TypeMap typeMap)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var converter = typeMap.CustomConverter!;
+        // Wrap the converter delegate in a Func<TSource, TDestination>.
+        var invoke = Expression.Invoke(Expression.Constant(converter), srcParam);
+        return Expression.Lambda(invoke, srcParam);
+    }
+
+    // ---- Collections ----
+
+    private static LambdaExpression BuildCollectionLambda(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var srcElement = GetEnumerableElementType(typeMap.SourceType)!;
+        var dstElement = GetEnumerableElementType(typeMap.DestinationType)!;
+
+        var helperName = typeMap.DestinationType.IsArray
+            ? nameof(MappingInvoker.InvokeToArray)
+            : nameof(MappingInvoker.InvokeToList);
+
+        var method = typeof(MappingInvoker)
+            .GetMethod(helperName, BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(srcElement, dstElement);
+
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(srcElement);
+        var sourceAsEnumerable = typeMap.SourceType.IsAssignableTo(enumerableType)
+            ? (Expression)srcParam
+            : Expression.Convert(srcParam, enumerableType);
+
+        var call = Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable);
+        return Expression.Lambda(call, srcParam);
+    }
+
+    // ---- Dictionaries ----
+
+    private static LambdaExpression BuildDictionaryLambda(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var srcArgs = typeMap.SourceType.GetGenericArguments();
+        var dstArgs = typeMap.DestinationType.GetGenericArguments();
+
+        var method = typeof(MappingInvoker)
+            .GetMethod(nameof(MappingInvoker.InvokeToDictionary), BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(srcArgs[0], srcArgs[1], dstArgs[0], dstArgs[1]);
+
+        var call = Expression.Call(method, Expression.Constant(registry), srcParam);
+        return Expression.Lambda(call, srcParam);
+    }
+
+    // ---- Type helpers ----
+
+    private static bool IsCollection(Type t)
+    {
+        if (t == typeof(string)) return false;
+        if (t.IsArray) return true;
+        if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(t)) return false;
+        if (IsDictionary(t)) return false;
+        return true;
+    }
+
+    private static bool IsDictionary(Type t) =>
+        t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>);
+
+    private static Type? GetEnumerableElementType(Type t)
+    {
+        if (t.IsArray) return t.GetElementType();
+        if (t.IsGenericType)
+        {
+            var def = t.GetGenericTypeDefinition();
+            if (def == typeof(IEnumerable<>) || def == typeof(ICollection<>) || def == typeof(IList<>)
+                || def == typeof(List<>) || def == typeof(IReadOnlyCollection<>) || def == typeof(IReadOnlyList<>))
+                return t.GetGenericArguments()[0];
+        }
+        var iface = t.GetInterfaces().FirstOrDefault(i =>
+            i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        return iface?.GetGenericArguments()[0];
+    }
+
+    private static bool HasImplicitNumericConversion(Type src, Type dst) =>
+        (src, dst) switch
+        {
+            _ when src == typeof(sbyte) => dst == typeof(short) || dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(byte) => dst == typeof(short) || dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(short) => dst == typeof(int) || dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(ushort) => dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(int) => dst == typeof(long) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(uint) => dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(long) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(ulong) => dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ when src == typeof(float) => dst == typeof(double),
+            _ when src == typeof(char) => dst == typeof(ushort) || dst == typeof(int) || dst == typeof(uint) || dst == typeof(long) || dst == typeof(ulong) || dst == typeof(float) || dst == typeof(double) || dst == typeof(decimal),
+            _ => false,
+        };
+
+    private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) =>
+            node == from ? to : base.VisitParameter(node);
+    }
+}
