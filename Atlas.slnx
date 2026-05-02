@@ -8,5 +8,6 @@
     <Project Path="tests/Atlas.Benchmarks/Atlas.Benchmarks.csproj" />
     <Project Path="tests/Atlas.Tests/Atlas.Tests.csproj" />
     <Project Path="tests/Atlas.Projections.Tests/Atlas.Projections.Tests.csproj" />
+    <Project Path="tests/Atlas.Projections.Tests.EFCore/Atlas.Projections.Tests.EFCore.csproj" />
   </Folder>
 </Solution>
