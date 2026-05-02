@@ -90,7 +90,6 @@ See `docs/Atlas-Design-ProjectTo.md` for the full design.
 
 Each of these has its own design doc to be written separately:
 
-- IQueryable projection (`ProjectTo`)
 - Inheritance / runtime polymorphism (`Include`, `IncludeBase`)
 - Enum mapping surface
 - Reverse mapping / unflattening
