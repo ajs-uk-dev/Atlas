@@ -97,6 +97,19 @@ public class ProjectionValidatorTests
     }
 
     [Fact]
+    public void Validate_NestedDictionary_RecursesIntoKeyAndValuePairs()
+    {
+        // Dictionary<string, VInnerSrc> -> Dictionary<string, VInnerDst>: the inner pair
+        // (VInnerSrc, VInnerDst) has no map registered. Validator should report THAT pair
+        // (recursing into the value type-arg), NOT a "no map for KeyValuePair<...>" error.
+        var registry = RegistryFor(c => c.CreateMap<VDictHolderSrc, VDictHolderDst>());
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ProjectionValidator.Validate(registry, new TypePair(typeof(VDictHolderSrc), typeof(VDictHolderDst)), maxDepth: 3));
+        Assert.Contains(ex.Diagnostics, d => d.SourceType == typeof(VInnerSrc) && d.DestinationType == typeof(VInnerDst));
+        Assert.DoesNotContain(ex.Diagnostics, d => d.SourceType.Name.Contains("KeyValuePair"));
+    }
+
+    [Fact]
     public void Validate_AggregatesAllErrors_NotJustFirst()
     {
         var registry = RegistryFor(c => c.CreateMap<VFlatSrc, VTwoMissingDst>());
@@ -118,3 +131,5 @@ public class VOuterDst { public VInnerDst Inner { get; set; } = new(); }
 public class VIntSrc { public int Count { get; set; } }
 public class VLongDst { public long Count { get; set; } }
 public class VNode { public VNode? Next { get; set; } }
+public class VDictHolderSrc { public Dictionary<string, VInnerSrc> Items { get; set; } = new(); }
+public class VDictHolderDst { public Dictionary<string, VInnerDst> Items { get; set; } = new(); }

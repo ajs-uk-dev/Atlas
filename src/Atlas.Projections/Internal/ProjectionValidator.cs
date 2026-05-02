@@ -1,4 +1,3 @@
-using System.Reflection;
 using Atlas.Internal;
 
 namespace Atlas.Projections.Internal;
@@ -70,18 +69,18 @@ internal static class ProjectionValidator
             if (leaf == target || target.IsAssignableFrom(leaf)) continue;
             if (HasImplicitNumericConversion(leaf, target)) continue;
 
-            if (IsCollection(leaf) && IsCollection(target))
-            {
-                Walk(new TypePair(GetEnumerableElementType(leaf)!, GetEnumerableElementType(target)!),
-                    depth + 1, registry, visited, diagnostics, maxDepth);
-                continue;
-            }
             if (IsDictionary(leaf) && IsDictionary(target))
             {
                 var srcArgs = leaf.GetGenericArguments();
                 var dstArgs = target.GetGenericArguments();
                 Walk(new TypePair(srcArgs[0], dstArgs[0]), depth + 1, registry, visited, diagnostics, maxDepth);
                 Walk(new TypePair(srcArgs[1], dstArgs[1]), depth + 1, registry, visited, diagnostics, maxDepth);
+                continue;
+            }
+            if (IsCollection(leaf) && IsCollection(target))
+            {
+                Walk(new TypePair(GetEnumerableElementType(leaf)!, GetEnumerableElementType(target)!),
+                    depth + 1, registry, visited, diagnostics, maxDepth);
                 continue;
             }
 
