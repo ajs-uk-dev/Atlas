@@ -50,6 +50,23 @@ Both `MapperConfiguration` and `IMapper` are registered as singletons. Profiles
 must be top-level public classes with a public parameterless constructor;
 violations throw `AtlasConfigurationException` at registration time.
 
+## Queryable projection (`Atlas.Projections`)
+
+Optional package that translates a configured map into a LINQ expression and applies it as a `Select` over an `IQueryable`. Designed for EF Core read paths.
+
+```csharp
+using Atlas.Projections;
+
+var dtos = db.Blogs
+    .Where(b => b.Year >= 2025)
+    .ProjectTo<BlogDto>(configuration)
+    .ToList();
+```
+
+The configuration is validated eagerly at the call site; non-projectable constructs (delegate-form `ConvertUsing`, missing maps, unmapped destination members) throw `AtlasProjectionException` listing every problem. Default recursion depth is 3 (per-call override available).
+
+See `docs/Atlas-Design-ProjectTo.md` for the full design.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -111,6 +128,7 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 |---|---|---|---|
 | `Atlas` | 91% | 85% | Line met. Branch coverage gap concentrated in the `HasImplicitNumericConversion` switch — duplicated between `ConventionEngine` and `ConfigurationValidator`; a v2 cleanup task is to consolidate into one helper and exercise via `[Theory]`. |
 | `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
+| `Atlas.Projections` | 94.8% | 59.29% | Line met. Branch coverage gap is the same `HasImplicitNumericConversion` switch-arm pattern documented for the v1 Atlas line. |
 
 ## License
 
