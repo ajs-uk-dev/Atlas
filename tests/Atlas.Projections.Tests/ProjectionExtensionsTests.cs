@@ -123,6 +123,115 @@ public class ProjectionExtensionsTests
         var src = new[] { new EFlatSrc() };
         Assert.Throws<ArgumentOutOfRangeException>(() => src.AsQueryable().ProjectTo<EFlatDst>(config, maxDepth: 0));
     }
+
+    [Fact]
+    public void ProjectTo_NumericConversion_IntToLong_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENumericSrc, ENumericDstLong>());
+        var src = new[] { new ENumericSrc { Value = 42 } };
+        var result = src.AsQueryable().ProjectTo<ENumericDstLong>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(42L, result[0].Value);
+    }
+
+    [Fact]
+    public void ProjectTo_NumericConversion_ByteToInt_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENumericByteSrc, ENumericIntDst>());
+        var src = new[] { new ENumericByteSrc { Value = 255 } };
+        var result = src.AsQueryable().ProjectTo<ENumericIntDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(255, result[0].Value);
+    }
+
+    [Fact]
+    public void ProjectTo_NumericConversion_ShortToFloat_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENumericShortSrc, ENumericFloatDst>());
+        var src = new[] { new ENumericShortSrc { Value = 100 } };
+        var result = src.AsQueryable().ProjectTo<ENumericFloatDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(100f, result[0].Value);
+    }
+
+    [Fact]
+    public void ProjectTo_NumericConversion_NullableIntToNullableLong_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENumericNullableSrc, ENumericNullableDst>());
+        var src = new[] { new ENumericNullableSrc { Value = 123 } };
+        var result = src.AsQueryable().ProjectTo<ENumericNullableDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(123L, result[0].Value);
+    }
+
+    [Fact]
+    public void ProjectTo_NumericConversion_CharToInt_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENumericCharSrc, ENumericIntDst2>());
+        var src = new[] { new ENumericCharSrc { Value = 'A' } };
+        var result = src.AsQueryable().ProjectTo<ENumericIntDst2>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal((int)'A', result[0].Value);
+    }
+
+    [Fact]
+    public void ProjectTo_CollectionToArray_ProjectsItemsToArray()
+    {
+        var config = BuildConfig(c =>
+        {
+            c.CreateMap<EInnerSrc, EInnerDst>();
+            c.CreateMap<EParentSrcArray, EParentDstArray>();
+        });
+        var src = new[] { new EParentSrcArray { Items = new List<EInnerSrc> { new() { Name = "a" }, new() { Name = "b" } } } };
+        var result = src.AsQueryable().ProjectTo<EParentDstArray>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(2, result[0].Items.Length);
+        Assert.Equal("a", result[0].Items[0].Name);
+    }
+
+    [Fact]
+    public void ProjectTo_IdentityCollection_ProjectsWithoutElementMap()
+    {
+        var config = BuildConfig(c => c.CreateMap<EStringCollectionSrc, EStringCollectionDst>());
+        var src = new[] { new EStringCollectionSrc { Items = new List<string> { "x", "y" } } };
+        var result = src.AsQueryable().ProjectTo<EStringCollectionDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal(["x", "y"], result[0].Items);
+    }
+
+    [Fact]
+    public void ProjectTo_CollectionToIEnumerable_ProjectsItems()
+    {
+        var config = BuildConfig(c =>
+        {
+            c.CreateMap<EInnerSrc, EInnerDst>();
+            c.CreateMap<EParentSrcIEnumerable, EParentDstIEnumerable>();
+        });
+        var src = new[] { new EParentSrcIEnumerable { Items = new List<EInnerSrc> { new() { Name = "test" } } } };
+        var result = src.AsQueryable().ProjectTo<EParentDstIEnumerable>(config).ToList();
+        Assert.Single(result);
+        Assert.Single(result[0].Items);
+    }
+
+    [Fact]
+    public void ProjectTo_ParameterlessConstructor_ProjectsSuccessfully()
+    {
+        var config = BuildConfig(c => c.CreateMap<ENoCtorParamSrc, ENoCtorParamDst>());
+        var src = new[] { new ENoCtorParamSrc { Name = "test" } };
+        var result = src.AsQueryable().ProjectTo<ENoCtorParamDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal("test", result[0].Name);
+    }
+
+    [Fact]
+    public void ProjectTo_StringIsNotTreatedAsCollection_ProjectsAsProperty()
+    {
+        var config = BuildConfig(c => c.CreateMap<EStringPropSrc, EStringPropDst>());
+        var src = new[] { new EStringPropSrc { Value = "hello" } };
+        var result = src.AsQueryable().ProjectTo<EStringPropDst>(config).ToList();
+        Assert.Single(result);
+        Assert.Equal("hello", result[0].Value);
+    }
 }
 
 // ---- Test fixtures ----
@@ -135,3 +244,23 @@ public class EOuterDst { public EInnerDst Inner { get; set; } = new(); }
 public class EParentSrc { public List<EInnerSrc> Items { get; set; } = new(); }
 public class EParentDst { public List<EInnerDst> Items { get; set; } = new(); }
 public class ENode { public ENode? Next { get; set; } }
+public class ENumericSrc { public int Value { get; set; } }
+public class ENumericDstLong { public long Value { get; set; } }
+public class ENumericByteSrc { public byte Value { get; set; } }
+public class ENumericIntDst { public int Value { get; set; } }
+public class ENumericShortSrc { public short Value { get; set; } }
+public class ENumericFloatDst { public float Value { get; set; } }
+public class ENumericNullableSrc { public int? Value { get; set; } }
+public class ENumericNullableDst { public long? Value { get; set; } }
+public class ENumericCharSrc { public char Value { get; set; } }
+public class ENumericIntDst2 { public int Value { get; set; } }
+public class EParentSrcArray { public List<EInnerSrc> Items { get; set; } = new(); }
+public class EParentDstArray { public EInnerDst[] Items { get; set; } = Array.Empty<EInnerDst>(); }
+public class EStringCollectionSrc { public List<string> Items { get; set; } = new(); }
+public class EStringCollectionDst { public List<string> Items { get; set; } = new(); }
+public class EParentSrcIEnumerable { public List<EInnerSrc> Items { get; set; } = new(); }
+public class EParentDstIEnumerable { public IEnumerable<EInnerDst> Items { get; set; } = Array.Empty<EInnerDst>(); }
+public class ENoCtorParamDst { public string Name { get; set; } = ""; }
+public class ENoCtorParamSrc { public string Name { get; set; } = ""; }
+public class EStringPropSrc { public string Value { get; set; } = ""; }
+public class EStringPropDst { public string Value { get; set; } = ""; }
