@@ -31,6 +31,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         var member = new MemberConfigurationExpression<TSource, TDestination, TMember>();
         memberOptions(member);
         member.ApplyTo(pm);
+        pm.IsExplicit = true;
         TypeMap.PropertyMaps.Add(pm);
         return this;
     }
@@ -48,6 +49,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         var member = new MemberConfigurationExpression<TSource, TDestination, object?>();
         paramOptions(member);
         member.ApplyTo(pm);
+        pm.IsExplicit = true;
         TypeMap.PropertyMaps.Add(pm);
         return this;
     }
@@ -64,6 +66,26 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
     {
         TypeMap.EnsureMutable();
         TypeMap.CustomConverter = converter;
+    }
+
+    public IMappingExpression<TSource, TDestination> Include<TDerivedSource, TDerivedDestination>()
+        where TDerivedSource : TSource
+        where TDerivedDestination : TDestination
+    {
+        TypeMap.EnsureMutable();
+        var pair = new TypePair(typeof(TDerivedSource), typeof(TDerivedDestination));
+        if (!TypeMap.IncludedDerived.Contains(pair))
+            TypeMap.IncludedDerived.Add(pair);
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> IncludeBase<TBaseSource, TBaseDestination>()
+    {
+        TypeMap.EnsureMutable();
+        var pair = new TypePair(typeof(TBaseSource), typeof(TBaseDestination));
+        if (!TypeMap.IncludedBases.Contains(pair))
+            TypeMap.IncludedBases.Add(pair);
+        return this;
     }
 
     private static PropertyInfo ExtractProperty<TMember>(Expression<Func<TDestination, TMember>> selector)

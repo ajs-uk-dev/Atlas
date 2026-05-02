@@ -21,6 +21,13 @@ internal sealed class PropertyMap
     public object? ConstantValue { get; set; }
     public bool HasConstant { get; set; }
     public bool Ignored { get; set; }
+    /// <summary>
+    /// True when this binding was configured via <c>ForMember</c> / <c>ForCtorParam</c>
+    /// (an explicit user choice). False when populated by <c>ConventionEngine</c>.
+    /// Used by <c>InheritanceMerger</c> as the precedence discriminator: derived explicit
+    /// beats base explicit beats derived convention.
+    /// </summary>
+    public bool IsExplicit { get; set; }
 
     public bool IsResolved => Ignored || HasConstant || CustomExpression is not null || SourcePath is not null;
 

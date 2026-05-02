@@ -29,6 +29,10 @@ public sealed class MapperConfiguration
         var pairIndex = typeMaps.ToDictionary(t => t.Pair);
         bool HasRegisteredMap(Type s, Type d) => pairIndex.ContainsKey(new TypePair(s, d));
 
+        // NEW: resolve inheritance before convention so derived maps see inherited
+        // explicit config as already-attached (and convention then fills gaps).
+        InheritanceMerger.Resolve(typeMaps, pairIndex);
+
         foreach (var tm in typeMaps)
             ConventionEngine.ResolveMissingMembers(tm, _conventionOptions, HasRegisteredMap);
 
