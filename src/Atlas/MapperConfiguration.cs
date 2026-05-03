@@ -10,6 +10,9 @@ public sealed class MapperConfiguration
 {
     private readonly MapperRegistry _registry;
     private readonly ConventionOptions _conventionOptions;
+    private readonly bool _enumValidationEnabled;
+    private readonly StringToEnumCache _stringToEnumCache = new();
+    internal StringToEnumCache Internal_StringToEnumCache => _stringToEnumCache;
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure)
         : this(BuildExpression(configure))
@@ -24,6 +27,8 @@ public sealed class MapperConfiguration
             expression.SourceMemberNamingConvention,
             expression.DestinationMemberNamingConvention,
             expression.CaseSensitive);
+
+        _enumValidationEnabled = expression.EnumValidationEnabled;
 
         var typeMaps = expression.GetTypeMaps().ToList();
         var pairIndex = typeMaps.ToDictionary(t => t.Pair);
@@ -40,7 +45,7 @@ public sealed class MapperConfiguration
             tm.Seal();
 
         expression.MarkBuilt();
-        _registry = new MapperRegistry(typeMaps);
+        _registry = new MapperRegistry(typeMaps, _stringToEnumCache);
     }
 
     private static MapperConfigurationExpression BuildExpression(Action<MapperConfigurationExpression> configure)
@@ -69,7 +74,8 @@ public sealed class MapperConfiguration
     /// Validate the configured maps. Throws <see cref="AtlasConfigurationException"/> aggregating
     /// every problem found, or returns silently. Algorithm: see design §8.
     /// </summary>
-    public void AssertConfigurationIsValid() => ConfigurationValidator.Validate(_registry);
+    public void AssertConfigurationIsValid() =>
+        ConfigurationValidator.Validate(_registry, _enumValidationEnabled);
 
     /// <summary>Create a fresh <see cref="IMapper"/> bound to this configuration.</summary>
     public IMapper CreateMapper() => new Mapper(this, _registry);

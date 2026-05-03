@@ -96,6 +96,44 @@ Member configuration on the base map flows to derived maps with the standard pre
 
 See `docs/Atlas-Design-Inheritance.md` for the full design.
 
+## Enum surface
+
+Enum-typed properties auto-convert without an explicit `CreateMap`:
+
+```csharp
+public enum OrderStatusV1 { Pending = 1, Active = 2, Cancelled = 3 }
+public enum OrderStatusV2 { Pending = 1, Active = 2, Cancelled = 3, Refunded = 4 }
+
+public class Order { public OrderStatusV1 Status { get; set; } }
+public class OrderDto { public OrderStatusV2 Status { get; set; } }
+
+cfg.CreateMap<Order, OrderDto>();
+// Status automatically maps from V1 to V2 by underlying value.
+```
+
+For customization, declare a `CreateMap<TEnumSrc, TEnumDst>()` with one or more enum methods:
+
+```csharp
+cfg.CreateMap<LegacyStatus, OrderStatusV2>()
+   .MapByName(ignoreCase: true)
+   .MapValue(LegacyStatus.Pending, OrderStatusV2.Active)
+   .Ignore(LegacyStatus.Internal)
+   .WithFallback(OrderStatusV2.Cancelled);
+```
+
+`mapper.Map<OrderStatusV2>(LegacyStatus.X)` consults: per-value override → ignore → strategy match → fallback → throws `AtlasMappingException`.
+
+**String ↔ enum** is also auto-handled (verbatim member name, case-sensitive parse). Cross-type enum mapping with different underlying types (e.g., `byte` → `int`) auto-converts.
+
+**Strict validation:** `cfg.EnableEnumMappingValidation()` makes `AssertConfigurationIsValid()` enforce that every defined source enum value in every registered enum→enum map is covered by override / ignore / strategy / fallback.
+
+**Foot-gun guards:**
+- `Ignore(srcValue)` produces `default(TDst)`. If `default(TDst)` isn't a defined value of TDst, validation throws — use `MapValue` with an explicit dest instead.
+- `[Flags]` enums: only single-bit defined values are recognized by the auto-strategy. Combinations require explicit `MapValue` declarations.
+- `Atlas.Projections` does NOT translate the enum-mapping switch into LINQ. ProjectTo of enum-typed properties relies on the underlying provider's enum support.
+
+See `docs/Atlas-Design-EnumSurface.md` for the full design.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -119,7 +157,6 @@ See `docs/Atlas-Design-Inheritance.md` for the full design.
 
 Each of these has its own design doc to be written separately:
 
-- Enum mapping surface
 - Reverse mapping / unflattening
 - Before/after hooks, value transformers
 - Conditional mapping (`Condition`, `PreCondition`)
@@ -153,7 +190,7 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 93.7% | 77.9% | Met. The `HasImplicitNumericConversion` switch was consolidated into `Atlas.Internal.NumericConversions` and is now exercised once via `[Theory]`. Inheritance support adds the `InheritanceMerger` and `ValidateInheritance` paths. |
+| `Atlas` | 93.1% | 81.3% | Met. Enum surface adds the `EnumResolver`, `EnumConversions`, and `ValidateEnum` paths. |
 | `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
 | `Atlas.Projections` | 93.91% | 83.57% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
 

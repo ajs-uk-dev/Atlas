@@ -16,6 +16,15 @@ public sealed class MapperConfigurationExpression
     public NamingConvention SourceMemberNamingConvention { get; set; } = NamingConvention.PascalCase;
     public NamingConvention DestinationMemberNamingConvention { get; set; } = NamingConvention.PascalCase;
     public bool CaseSensitive { get; set; } = true;
+    internal bool EnumValidationEnabled { get; private set; }
+
+    /// <summary>
+    /// Enables strict source-side enum mapping validation. When enabled,
+    /// <see cref="MapperConfiguration.AssertConfigurationIsValid"/> asserts that every defined
+    /// source enum value in every registered enum→enum map is covered by MapValue, Ignore,
+    /// the strategy, or WithFallback. Disabled by default.
+    /// </summary>
+    public void EnableEnumMappingValidation() => EnumValidationEnabled = true;
 
     public IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>(
         MemberList memberList = MemberList.Destination)

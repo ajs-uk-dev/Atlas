@@ -11,6 +11,11 @@ internal static class ExecutionPlanBuilder
 {
     public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
     {
+        // Enum dispatch — both source AND destination must be enums (sealed value types,
+        // so this branch is mutually exclusive with inheritance dispatch below).
+        if (typeMap.SourceType.IsEnum && typeMap.DestinationType.IsEnum)
+            return BuildEnumLambda(typeMap);
+
         // Per-base body (existing v1 codegen).
         var baseLambda = BuildBaseBody(typeMap, registry);
 
@@ -18,6 +23,47 @@ internal static class ExecutionPlanBuilder
             return baseLambda;
 
         return BuildWithInheritanceDispatch(baseLambda, typeMap, registry);
+    }
+
+    private static readonly EnumMapConfig DefaultEnumConfig = new();
+
+    private static readonly ConstructorInfo AtlasMappingExceptionCtor =
+        typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
+
+    private static LambdaExpression BuildEnumLambda(TypeMap typeMap)
+    {
+        var cfg = typeMap.EnumConfig ?? DefaultEnumConfig;
+        var srcType = typeMap.SourceType;
+        var dstType = typeMap.DestinationType;
+        var srcParam = Expression.Parameter(srcType, "src");
+
+        var cases = new List<SwitchCase>();
+        foreach (var definedSrc in Enum.GetValues(srcType))
+        {
+            var action = EnumResolver.Resolve(definedSrc, cfg, srcType, dstType);
+            Expression caseBody = action.Kind switch
+            {
+                EnumResolver.ActionKind.Hit =>
+                    Expression.Constant(action.DestValue, dstType),
+                EnumResolver.ActionKind.Throw =>
+                    Expression.Throw(
+                        Expression.New(AtlasMappingExceptionCtor, Expression.Constant(action.Reason)),
+                        dstType),
+                _ => throw new InvalidOperationException("Unreachable"),
+            };
+            cases.Add(Expression.SwitchCase(caseBody, Expression.Constant(definedSrc, srcType)));
+        }
+
+        // Default case: source value not in defined values of srcType (e.g., (SrcEnum)99).
+        var defaultBody = Expression.Throw(
+            Expression.New(
+                AtlasMappingExceptionCtor,
+                Expression.Constant($"Source value is not defined on {srcType.Name}.")),
+            dstType);
+
+        var switchExpr = Expression.Switch(srcParam, defaultBody, cases.ToArray());
+        var funcType = typeof(Func<,>).MakeGenericType(srcType, dstType);
+        return Expression.Lambda(funcType, switchExpr, srcParam);
     }
 
     private static LambdaExpression BuildBaseBody(TypeMap typeMap, MapperRegistry registry)
@@ -278,6 +324,13 @@ internal static class ExecutionPlanBuilder
 
         if (NumericConversions.HasImplicitConversion(source.Type, targetType))
             return Expression.Convert(source, targetType);
+
+        // Enum auto-conversion (NEW): only if no registered typemap covers the pair.
+        if (EnumConversions.HasImplicitConversion(source.Type, targetType)
+            && registry.GetTypeMap(new TypePair(source.Type, targetType)) is null)
+        {
+            return EnumConversions.BuildConversion(source, targetType, registry.StringToEnumCache);
+        }
 
         if (IsCollection(source.Type) && IsCollection(targetType))
             return BuildCollectionInvoke(source, targetType, registry);

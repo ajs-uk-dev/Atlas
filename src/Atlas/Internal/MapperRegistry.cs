@@ -12,9 +12,12 @@ internal sealed class MapperRegistry
     private readonly Dictionary<TypePair, int> _compileCounts = new();
     private readonly Lock _lock = new();
 
-    public MapperRegistry(IEnumerable<TypeMap> typeMaps)
+    public StringToEnumCache StringToEnumCache { get; }
+
+    public MapperRegistry(IEnumerable<TypeMap> typeMaps, StringToEnumCache? stringToEnumCache = null)
     {
         _typeMaps = typeMaps.ToDictionary(t => t.Pair);
+        StringToEnumCache = stringToEnumCache ?? new StringToEnumCache();
     }
 
     public TypeMap? GetTypeMap(TypePair pair) =>
