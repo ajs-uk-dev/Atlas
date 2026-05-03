@@ -325,6 +325,13 @@ internal static class ExecutionPlanBuilder
         if (NumericConversions.HasImplicitConversion(source.Type, targetType))
             return Expression.Convert(source, targetType);
 
+        // Enum auto-conversion (NEW): only if no registered typemap covers the pair.
+        if (EnumConversions.HasImplicitConversion(source.Type, targetType)
+            && registry.GetTypeMap(new TypePair(source.Type, targetType)) is null)
+        {
+            return EnumConversions.BuildConversion(source, targetType, registry.StringToEnumCache);
+        }
+
         if (IsCollection(source.Type) && IsCollection(targetType))
             return BuildCollectionInvoke(source, targetType, registry);
 

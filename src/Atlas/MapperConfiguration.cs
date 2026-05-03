@@ -11,6 +11,8 @@ public sealed class MapperConfiguration
     private readonly MapperRegistry _registry;
     private readonly ConventionOptions _conventionOptions;
     private readonly bool _enumValidationEnabled;
+    private readonly StringToEnumCache _stringToEnumCache = new();
+    internal StringToEnumCache Internal_StringToEnumCache => _stringToEnumCache;
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure)
         : this(BuildExpression(configure))
@@ -43,7 +45,7 @@ public sealed class MapperConfiguration
             tm.Seal();
 
         expression.MarkBuilt();
-        _registry = new MapperRegistry(typeMaps);
+        _registry = new MapperRegistry(typeMaps, _stringToEnumCache);
     }
 
     private static MapperConfigurationExpression BuildExpression(Action<MapperConfigurationExpression> configure)

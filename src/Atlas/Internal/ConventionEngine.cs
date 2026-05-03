@@ -149,6 +149,7 @@ internal static class ConventionEngine
     {
         if (dst.IsAssignableFrom(src)) return true;
         if (NumericConversions.HasImplicitConversion(src, dst)) return true;
+        if (EnumConversions.HasImplicitConversion(src, dst)) return true;   // NEW
         if (IsEnumerable(src) && IsEnumerable(dst)) return true;
         if (IsComplex(src) && IsComplex(dst)) return true;
         if (hasRegisteredMap is not null && hasRegisteredMap(src, dst)) return true;
