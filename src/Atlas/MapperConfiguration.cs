@@ -10,6 +10,7 @@ public sealed class MapperConfiguration
 {
     private readonly MapperRegistry _registry;
     private readonly ConventionOptions _conventionOptions;
+    private readonly bool _enumValidationEnabled;
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure)
         : this(BuildExpression(configure))
@@ -24,6 +25,8 @@ public sealed class MapperConfiguration
             expression.SourceMemberNamingConvention,
             expression.DestinationMemberNamingConvention,
             expression.CaseSensitive);
+
+        _enumValidationEnabled = expression.EnumValidationEnabled;
 
         var typeMaps = expression.GetTypeMaps().ToList();
         var pairIndex = typeMaps.ToDictionary(t => t.Pair);

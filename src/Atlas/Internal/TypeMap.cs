@@ -27,6 +27,14 @@ internal sealed class TypeMap
     /// </summary>
     public List<TypePair> IncludedBases { get; } = new();
 
+    /// <summary>
+    /// Per-typemap enum customization (strategy, per-value overrides, ignored source values,
+    /// fallback). Null unless an enum-method has been called on the fluent surface; null also
+    /// for non-enum typemaps. Compilation honours null as "use default ByValue strategy with
+    /// no overrides" for typemaps where source/dest are both enums.
+    /// </summary>
+    public EnumMapConfig? EnumConfig { get; set; }
+
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
 
