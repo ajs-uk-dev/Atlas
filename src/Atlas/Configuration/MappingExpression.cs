@@ -88,6 +88,71 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         return this;
     }
 
+    // ---- Enum surface ----
+
+    public IMappingExpression<TSource, TDestination> MapByValue()
+    {
+        TypeMap.EnsureMutable();
+        EnsureBothEnums(nameof(MapByValue));
+        EnsureEnumConfig().SetStrategy(EnumMappingStrategy.ByValue, ignoreCase: false);
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> MapByName(bool ignoreCase = false)
+    {
+        TypeMap.EnsureMutable();
+        EnsureBothEnums(nameof(MapByName));
+        EnsureEnumConfig().SetStrategy(EnumMappingStrategy.ByName, ignoreCase);
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> MapValue(TSource sourceValue, TDestination destinationValue)
+    {
+        TypeMap.EnsureMutable();
+        EnsureBothEnums(nameof(MapValue));
+        EnsureEnumConfig().AddOverride(sourceValue!, destinationValue!);
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> Ignore(TSource sourceValue)
+    {
+        TypeMap.EnsureMutable();
+        EnsureSourceEnum(nameof(Ignore));
+        EnsureEnumConfig().AddIgnore(sourceValue!);
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> WithFallback(TDestination fallbackValue)
+    {
+        TypeMap.EnsureMutable();
+        EnsureDestEnum(nameof(WithFallback));
+        EnsureEnumConfig().SetFallback(fallbackValue!);
+        return this;
+    }
+
+    private EnumMapConfig EnsureEnumConfig() => TypeMap.EnumConfig ??= new EnumMapConfig();
+
+    private static void EnsureBothEnums(string methodName)
+    {
+        if (!typeof(TSource).IsEnum || !typeof(TDestination).IsEnum)
+            throw new InvalidOperationException(
+                $"{methodName}() requires both TSource ({typeof(TSource).Name}) and TDestination ({typeof(TDestination).Name}) to be enum types.");
+    }
+
+    private static void EnsureSourceEnum(string methodName)
+    {
+        if (!typeof(TSource).IsEnum)
+            throw new InvalidOperationException(
+                $"{methodName}(TSource) requires TSource ({typeof(TSource).Name}) to be an enum type.");
+    }
+
+    private static void EnsureDestEnum(string methodName)
+    {
+        if (!typeof(TDestination).IsEnum)
+            throw new InvalidOperationException(
+                $"{methodName}(TDestination) requires TDestination ({typeof(TDestination).Name}) to be an enum type.");
+    }
+
     private static PropertyInfo ExtractProperty<TMember>(Expression<Func<TDestination, TMember>> selector)
     {
         var body = selector.Body;
