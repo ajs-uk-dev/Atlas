@@ -74,7 +74,8 @@ public sealed class MapperConfiguration
     /// Validate the configured maps. Throws <see cref="AtlasConfigurationException"/> aggregating
     /// every problem found, or returns silently. Algorithm: see design §8.
     /// </summary>
-    public void AssertConfigurationIsValid() => ConfigurationValidator.Validate(_registry);
+    public void AssertConfigurationIsValid() =>
+        ConfigurationValidator.Validate(_registry, _enumValidationEnabled);
 
     /// <summary>Create a fresh <see cref="IMapper"/> bound to this configuration.</summary>
     public IMapper CreateMapper() => new Mapper(this, _registry);

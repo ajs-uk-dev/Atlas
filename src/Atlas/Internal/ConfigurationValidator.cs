@@ -9,11 +9,18 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class ConfigurationValidator
 {
-    public static void Validate(MapperRegistry registry)
+    public static void Validate(MapperRegistry registry, bool enumValidationEnabled = false)
     {
         var errors = new List<ConfigurationError>();
         foreach (var tm in registry.AllTypeMaps)
         {
+            // Enum rules (always-on; covers per-value overrides, fallback, foot-gun guard).
+            ValidateEnum(tm, errors);
+
+            // Strict-mode enum source-side coverage (Task 9).
+            if (enumValidationEnabled)
+                ValidateEnumStrict(tm, errors);
+
             // Inheritance rules (design §7.3).
             ValidateInheritance(tm, registry, errors);
 
@@ -104,6 +111,60 @@ internal static class ConfigurationValidator
 
     private static bool IsEnumerable(Type t) =>
         t != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(t);
+
+    private static void ValidateEnum(TypeMap tm, List<ConfigurationError> errors)
+    {
+        if (tm.EnumConfig is null) return;
+        var cfg = tm.EnumConfig;
+        var srcType = tm.SourceType;
+        var dstType = tm.DestinationType;
+
+        // Rule: PerValueOverrides keys must be defined on srcType.
+        foreach (var (src, dst) in cfg.PerValueOverrides)
+        {
+            if (!Enum.IsDefined(srcType, src))
+                errors.Add(new ConfigurationError(
+                    srcType, dstType, "(MapValue)",
+                    $"MapValue source value '{src}' is not defined on {srcType.Name}."));
+            if (!Enum.IsDefined(dstType, dst))
+                errors.Add(new ConfigurationError(
+                    srcType, dstType, "(MapValue)",
+                    $"MapValue destination value '{dst}' is not defined on {dstType.Name}."));
+        }
+
+        // Rule: IgnoredSourceValues entries must be defined on srcType.
+        foreach (var src in cfg.IgnoredSourceValues)
+        {
+            if (!Enum.IsDefined(srcType, src))
+                errors.Add(new ConfigurationError(
+                    srcType, dstType, "(Ignore)",
+                    $"Ignore source value '{src}' is not defined on {srcType.Name}."));
+        }
+
+        // Rule: Fallback must be defined on dstType.
+        if (cfg.HasFallback)
+        {
+            if (!Enum.IsDefined(dstType, cfg.FallbackValue!))
+                errors.Add(new ConfigurationError(
+                    srcType, dstType, "(WithFallback)",
+                    $"WithFallback value '{cfg.FallbackValue}' is not defined on {dstType.Name}."));
+        }
+
+        // Rule: foot-gun guard — Ignore + undefined default(dstType).
+        if (cfg.IgnoredSourceValues.Count > 0)
+        {
+            var defaultDst = Activator.CreateInstance(dstType)!;
+            if (!Enum.IsDefined(dstType, defaultDst))
+                errors.Add(new ConfigurationError(
+                    srcType, dstType, "(Ignore)",
+                    $"Ignore() would produce default({dstType.Name}) which is not a defined enum value (zero value undefined). Use MapValue with an explicit destination instead."));
+        }
+    }
+
+    private static void ValidateEnumStrict(TypeMap tm, List<ConfigurationError> errors)
+    {
+        // Filled in Task 9.
+    }
 
     private static void ValidateInheritance(TypeMap tm, MapperRegistry registry, List<ConfigurationError> errors)
     {
