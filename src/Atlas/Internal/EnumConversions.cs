@@ -13,6 +13,19 @@ internal static class EnumConversions
     private static readonly System.Reflection.ConstructorInfo AtlasMappingExceptionCtor =
         typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
 
+    private static readonly EnumMapConfig DefaultEnumConfig = new();
+
+    private static readonly System.Reflection.MethodInfo EnumGetNameMethod =
+        typeof(Enum).GetMethod(nameof(Enum.GetName), new[] { typeof(Type), typeof(object) })!;
+
+    private static readonly System.Reflection.MethodInfo DictionaryTryGetValueMethod =
+        typeof(Dictionary<string, object>).GetMethod(
+            nameof(Dictionary<string, object>.TryGetValue),
+            new[] { typeof(string), typeof(object).MakeByRefType() })!;
+
+    private static readonly System.Reflection.MethodInfo StringConcat3Method =
+        typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string), typeof(string) })!;
+
     public static bool HasImplicitConversion(Type srcType, Type dstType)
     {
         var srcCore = Nullable.GetUnderlyingType(srcType) ?? srcType;
@@ -52,7 +65,7 @@ internal static class EnumConversions
     private static Expression BuildEnumToEnum(Expression srcExpr, Type srcEnum, Type dstFullType, Type dstEnum)
     {
         // Build a switch expression for all defined source values, default ByValue, no overrides.
-        var cfg = new EnumMapConfig();   // defaults: ByValue, no overrides
+        var cfg = DefaultEnumConfig;   // defaults: ByValue, no overrides
 
         var srcParam = Expression.Parameter(srcEnum, "_src");
         var cases = new List<SwitchCase>();
@@ -104,21 +117,19 @@ internal static class EnumConversions
 
     private static Expression BuildEnumToString(Expression srcExpr, Type srcEnum)
     {
-        var getName = typeof(Enum).GetMethod(nameof(Enum.GetName), new[] { typeof(Type), typeof(object) })!;
-
         if (Nullable.GetUnderlyingType(srcExpr.Type) is not null)
         {
             // src.HasValue ? Enum.GetName(srcEnum, src.Value) : null
             var hasValue = Expression.Property(srcExpr, "HasValue");
             var srcValue = Expression.Property(srcExpr, "Value");   // typed as srcEnum
             var getNameCall = Expression.Call(
-                getName,
+                EnumGetNameMethod,
                 Expression.Constant(srcEnum),
                 Expression.Convert(srcValue, typeof(object)));
             return Expression.Condition(hasValue, getNameCall, Expression.Constant(null, typeof(string)));
         }
 
-        return Expression.Call(getName, Expression.Constant(srcEnum), Expression.Convert(srcExpr, typeof(object)));
+        return Expression.Call(EnumGetNameMethod, Expression.Constant(srcEnum), Expression.Convert(srcExpr, typeof(object)));
     }
 
     private static Expression BuildStringToEnum(Expression srcExpr, Type dstEnum, StringToEnumCache cache)
@@ -126,16 +137,13 @@ internal static class EnumConversions
         var dict = cache.GetOrCreateForType(dstEnum);
         var dictConst = Expression.Constant(dict, typeof(Dictionary<string, object>));
 
-        var tryGet = typeof(Dictionary<string, object>).GetMethod(
-            nameof(Dictionary<string, object>.TryGetValue),
-            new[] { typeof(string), typeof(object).MakeByRefType() })!;
         var outVar = Expression.Variable(typeof(object), "v");
 
         var mismatchThrow = Expression.Throw(
             Expression.New(
                 AtlasMappingExceptionCtor,
                 Expression.Call(
-                    typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string), typeof(string) })!,
+                    StringConcat3Method,
                     Expression.Constant("String value '"),
                     srcExpr,
                     Expression.Constant($"' does not match any defined name of {dstEnum.Name}."))),
@@ -155,7 +163,7 @@ internal static class EnumConversions
                 Expression.ReferenceEqual(srcExpr, Expression.Constant(null, typeof(string))),
                 nullThrow),
             Expression.Condition(
-                Expression.Call(dictConst, tryGet, srcExpr, outVar),
+                Expression.Call(dictConst, DictionaryTryGetValueMethod, srcExpr, outVar),
                 Expression.Convert(outVar, dstEnum),
                 mismatchThrow));
     }

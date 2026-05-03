@@ -190,7 +190,7 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 92.7% | 78.5% | Met. Enum surface adds the `EnumResolver`, `EnumConversions`, and `ValidateEnum` paths. |
+| `Atlas` | 93.1% | 81.3% | Met. Enum surface adds the `EnumResolver`, `EnumConversions`, and `ValidateEnum` paths. |
 | `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
 | `Atlas.Projections` | 93.91% | 83.57% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
 

@@ -120,14 +120,14 @@ internal static class ConfigurationValidator
         var srcType = tm.SourceType;
         var dstType = tm.DestinationType;
 
-        // Rule: PerValueOverrides keys must be defined on srcType.
+        // Rule: PerValueOverrides keys must be defined on srcType / dstType.
         foreach (var (src, dst) in cfg.PerValueOverrides)
         {
-            if (!Enum.IsDefined(srcType, src))
+            if (srcType.IsEnum && !Enum.IsDefined(srcType, src))
                 errors.Add(new ConfigurationError(
                     srcType, dstType, "(MapValue)",
                     $"MapValue source value '{src}' is not defined on {srcType.Name}."));
-            if (!Enum.IsDefined(dstType, dst))
+            if (dstType.IsEnum && !Enum.IsDefined(dstType, dst))
                 errors.Add(new ConfigurationError(
                     srcType, dstType, "(MapValue)",
                     $"MapValue destination value '{dst}' is not defined on {dstType.Name}."));
@@ -136,14 +136,14 @@ internal static class ConfigurationValidator
         // Rule: IgnoredSourceValues entries must be defined on srcType.
         foreach (var src in cfg.IgnoredSourceValues)
         {
-            if (!Enum.IsDefined(srcType, src))
+            if (srcType.IsEnum && !Enum.IsDefined(srcType, src))
                 errors.Add(new ConfigurationError(
                     srcType, dstType, "(Ignore)",
                     $"Ignore source value '{src}' is not defined on {srcType.Name}."));
         }
 
         // Rule: Fallback must be defined on dstType.
-        if (cfg.HasFallback)
+        if (cfg.HasFallback && dstType.IsEnum)
         {
             if (!Enum.IsDefined(dstType, cfg.FallbackValue!))
                 errors.Add(new ConfigurationError(
@@ -152,7 +152,7 @@ internal static class ConfigurationValidator
         }
 
         // Rule: foot-gun guard — Ignore + undefined default(dstType).
-        if (cfg.IgnoredSourceValues.Count > 0)
+        if (cfg.IgnoredSourceValues.Count > 0 && dstType.IsEnum)
         {
             var defaultDst = Activator.CreateInstance(dstType)!;
             if (!Enum.IsDefined(dstType, defaultDst))

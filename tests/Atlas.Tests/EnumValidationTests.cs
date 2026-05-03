@@ -110,6 +110,20 @@ public class EnumValidationTests
         cfg.AssertConfigurationIsValid();   // no throw
     }
 
+    [Fact]
+    public void Ignore_OnMapWithNonEnumDest_AssertConfig_DoesNotThrowArgumentException()
+    {
+        // C1 regression: Ignore(TSource) doesn't enforce TDest is enum.
+        // The validator's foot-gun guard must not call Enum.IsDefined on a non-enum dst type
+        // (which would throw unhandled ArgumentException, escaping the error-aggregation path).
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<Src, NotAnEnumPoco>().Ignore(Src.A));
+        var ex = Record.Exception(() => cfg.AssertConfigurationIsValid());
+        Assert.False(ex is ArgumentException,
+            $"Expected no ArgumentException, but got: {ex?.GetType().Name}: {ex?.Message}");
+    }
+
     public class SrcWithEnumProp { public SrcGap Value { get; set; } }
     public class DstWithStringProp { public string? Value { get; set; } }
+    public class NotAnEnumPoco { public int Value { get; set; } }
 }
