@@ -107,4 +107,13 @@ public class EnumAutoConversionTests
         var dst = mapper.Map<SrcWithNullableE1, DstWithNullableE1>(new SrcWithNullableE1 { Value = null });
         Assert.Null(dst.Value);
     }
+
+    [Fact]
+    public void StringToEnum_NullString_ThrowsAtlasMappingException()
+    {
+        var cfg = new MapperConfiguration(c => c.CreateMap<SrcWithString, DstWithE1>());
+        var mapper = cfg.CreateMapper();
+        Assert.Throws<AtlasMappingException>(() =>
+            mapper.Map<SrcWithString, DstWithE1>(new SrcWithString { Value = null }));
+    }
 }

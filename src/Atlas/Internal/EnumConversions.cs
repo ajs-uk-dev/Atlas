@@ -10,6 +10,9 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class EnumConversions
 {
+    private static readonly System.Reflection.ConstructorInfo AtlasMappingExceptionCtor =
+        typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
+
     public static bool HasImplicitConversion(Type srcType, Type dstType)
     {
         var srcCore = Nullable.GetUnderlyingType(srcType) ?? srcType;
@@ -63,7 +66,7 @@ internal static class EnumConversions
                 EnumResolver.ActionKind.Throw =>
                     Expression.Throw(
                         Expression.New(
-                            typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
+                            AtlasMappingExceptionCtor,
                             Expression.Constant(action.Reason)),
                         dstEnum),
                 _ => throw new InvalidOperationException("Unreachable"),
@@ -72,7 +75,7 @@ internal static class EnumConversions
         }
         var defaultBody = Expression.Throw(
             Expression.New(
-                typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
+                AtlasMappingExceptionCtor,
                 Expression.Constant($"Source value is not defined on {srcEnum.Name}.")),
             dstEnum);
 
@@ -101,12 +104,21 @@ internal static class EnumConversions
 
     private static Expression BuildEnumToString(Expression srcExpr, Type srcEnum)
     {
-        // Enum.GetName(srcEnumType, srcValue) returns null for undefined casts.
-        var srcCore = Nullable.GetUnderlyingType(srcExpr.Type) is not null
-            ? Expression.Property(srcExpr, "Value")
-            : srcExpr;
         var getName = typeof(Enum).GetMethod(nameof(Enum.GetName), new[] { typeof(Type), typeof(object) })!;
-        return Expression.Call(getName, Expression.Constant(srcEnum), Expression.Convert(srcCore, typeof(object)));
+
+        if (Nullable.GetUnderlyingType(srcExpr.Type) is not null)
+        {
+            // src.HasValue ? Enum.GetName(srcEnum, src.Value) : null
+            var hasValue = Expression.Property(srcExpr, "HasValue");
+            var srcValue = Expression.Property(srcExpr, "Value");   // typed as srcEnum
+            var getNameCall = Expression.Call(
+                getName,
+                Expression.Constant(srcEnum),
+                Expression.Convert(srcValue, typeof(object)));
+            return Expression.Condition(hasValue, getNameCall, Expression.Constant(null, typeof(string)));
+        }
+
+        return Expression.Call(getName, Expression.Constant(srcEnum), Expression.Convert(srcExpr, typeof(object)));
     }
 
     private static Expression BuildStringToEnum(Expression srcExpr, Type dstEnum, StringToEnumCache cache)
@@ -121,7 +133,7 @@ internal static class EnumConversions
 
         var mismatchThrow = Expression.Throw(
             Expression.New(
-                typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
+                AtlasMappingExceptionCtor,
                 Expression.Call(
                     typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string), typeof(string) })!,
                     Expression.Constant("String value '"),
@@ -131,7 +143,7 @@ internal static class EnumConversions
 
         var nullThrow = Expression.Throw(
             Expression.New(
-                typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
+                AtlasMappingExceptionCtor,
                 Expression.Constant($"Cannot map null string to enum type {dstEnum.Name}.")),
             dstEnum);
 
