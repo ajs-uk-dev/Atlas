@@ -25,9 +25,14 @@ internal static class ExecutionPlanBuilder
         return BuildWithInheritanceDispatch(baseLambda, typeMap, registry);
     }
 
+    private static readonly EnumMapConfig DefaultEnumConfig = new();
+
+    private static readonly ConstructorInfo AtlasMappingExceptionCtor =
+        typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
+
     private static LambdaExpression BuildEnumLambda(TypeMap typeMap)
     {
-        var cfg = typeMap.EnumConfig ?? new EnumMapConfig();
+        var cfg = typeMap.EnumConfig ?? DefaultEnumConfig;
         var srcType = typeMap.SourceType;
         var dstType = typeMap.DestinationType;
         var srcParam = Expression.Parameter(srcType, "src");
@@ -42,9 +47,7 @@ internal static class ExecutionPlanBuilder
                     Expression.Constant(action.DestValue, dstType),
                 EnumResolver.ActionKind.Throw =>
                     Expression.Throw(
-                        Expression.New(
-                            typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
-                            Expression.Constant(action.Reason)),
+                        Expression.New(AtlasMappingExceptionCtor, Expression.Constant(action.Reason)),
                         dstType),
                 _ => throw new InvalidOperationException("Unreachable"),
             };
@@ -54,7 +57,7 @@ internal static class ExecutionPlanBuilder
         // Default case: source value not in defined values of srcType (e.g., (SrcEnum)99).
         var defaultBody = Expression.Throw(
             Expression.New(
-                typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
+                AtlasMappingExceptionCtor,
                 Expression.Constant($"Source value is not defined on {srcType.Name}.")),
             dstType);
 
