@@ -85,15 +85,18 @@ src/Atlas/
   Configuration/
     IMappingExpression.cs           ← add 5 enum methods (MapByValue/MapByName/MapValue/Ignore/WithFallback)
     MappingExpression.cs            ← implement them
-    MapperConfigurationExpression.cs ← add EnableEnumMappingValidation()
   Internal/
     TypeMap.cs                      ← add EnumConfig field
     EnumMapConfig.cs                ← NEW: per-typemap enum config object
     EnumConversions.cs              ← NEW: auto-conversion layer
+    EnumResolver.cs                 ← NEW: shared per-value resolution (used by builder + validator)
+    StringToEnumCache.cs            ← NEW: per-config dst-enum lookup cache
     ExecutionPlanBuilder.cs         ← enum prologue + BuildEnumLambda
     ConventionEngine.cs             ← EnumConversions hook in IsAssignmentCompatible + property path
     ConfigurationValidator.cs       ← always-on enum invariants + strict-mode validation
   MapperConfiguration.cs            ← propagate EnumValidationEnabled flag to validator
+  MapperConfigurationExpression.cs  ← add EnableEnumMappingValidation()
+  AtlasMappingException.cs          ← NEW: runtime mapping errors (replaces ad-hoc InvalidOperationException for enum throws)
 
 tests/Atlas.Tests/
   Internal/
