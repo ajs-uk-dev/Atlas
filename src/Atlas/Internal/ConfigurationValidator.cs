@@ -96,6 +96,7 @@ internal static class ConfigurationValidator
     {
         if (dst.IsAssignableFrom(src)) return true;
         if (NumericConversions.HasImplicitConversion(src, dst)) return true;
+        if (EnumConversions.HasImplicitConversion(src, dst)) return true;
         if (registry.GetTypeMap(new TypePair(src, dst)) is not null) return true;
         if (IsEnumerable(src) && IsEnumerable(dst)) return true;
         return false;
@@ -163,7 +164,28 @@ internal static class ConfigurationValidator
 
     private static void ValidateEnumStrict(TypeMap tm, List<ConfigurationError> errors)
     {
-        // Filled in Task 9.
+        // Strict mode applies only to typemaps where BOTH sides are enum types.
+        // (Auto-conversions at the property level — enum→string, string→enum, etc. — are not
+        // validated here; they're not registered typemaps.)
+        if (!tm.SourceType.IsEnum || !tm.DestinationType.IsEnum) return;
+
+        var cfg = tm.EnumConfig ?? new EnumMapConfig();   // null → use defaults (ByValue)
+        var uncovered = new List<object>();
+
+        foreach (var definedSrc in Enum.GetValues(tm.SourceType))
+        {
+            var action = EnumResolver.Resolve(definedSrc, cfg, tm.SourceType, tm.DestinationType);
+            if (action.Kind == EnumResolver.ActionKind.Throw)
+                uncovered.Add(definedSrc);
+        }
+
+        if (uncovered.Count > 0)
+        {
+            var list = string.Join(", ", uncovered);
+            errors.Add(new ConfigurationError(
+                tm.SourceType, tm.DestinationType, "(strict)",
+                $"Strict enum validation: source values [{list}] have no mapping. Declare MapValue / Ignore for each, or WithFallback for a catch-all."));
+        }
     }
 
     private static void ValidateInheritance(TypeMap tm, MapperRegistry registry, List<ConfigurationError> errors)
