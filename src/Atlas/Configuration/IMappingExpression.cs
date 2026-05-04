@@ -180,4 +180,54 @@ public interface IMappingExpression<TSource, TDestination>
     /// Thrown at configuration time if <typeparamref name="TDestination"/> is not an enum.
     /// </exception>
     IMappingExpression<TSource, TDestination> WithFallback(TDestination fallbackValue);
+
+    // ---- Before/After hooks ----
+
+    /// <summary>
+    /// Registers a callback to run BEFORE any destination member is mapped. Multiple BeforeMap
+    /// calls on the same map run in registration order (FIFO). With inheritance, base hooks
+    /// run before derived hooks (base-first order).
+    /// </summary>
+    /// <remarks>
+    /// Hooks fire on every <see cref="IMapper.Map{TDestination}"/> call (including update-in-place
+    /// via <c>Map&lt;TS, TD&gt;(src, existingDest)</c>) and on every per-element invocation when
+    /// mapping a collection. Hooks DO NOT auto-propagate across <c>.ReverseMap()</c> — configure
+    /// hooks on the reverse expression separately if needed.
+    /// <para>
+    /// Hooks are NOT translatable to IQueryable. Calling <c>query.ProjectTo&lt;TDestination&gt;()</c>
+    /// against a TypeMap with hooks throws <see cref="AtlasConfigurationException"/> at
+    /// projection-build time naming the hook count.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="hook"/> is null.</exception>
+    IMappingExpression<TSource, TDestination> BeforeMap(Action<TSource, TDestination> hook);
+
+    /// <summary>
+    /// Registers a typed mapping-action class to run BEFORE any destination member is mapped.
+    /// The action is instantiated via <c>ActivatorUtilities.CreateInstance</c> from the root
+    /// <see cref="System.IServiceProvider"/> when Atlas is registered through DI; without DI,
+    /// requires a public parameterless constructor. The instance is cached once per configuration.
+    /// </summary>
+    /// <remarks>
+    /// Use this overload to inject services (logging, IOptions, telemetry, IHttpContextAccessor).
+    /// See <see cref="IMappingAction{TSource, TDestination}"/> for the scoped-service limitation.
+    /// </remarks>
+    IMappingExpression<TSource, TDestination> BeforeMap<TAction>()
+        where TAction : IMappingAction<TSource, TDestination>;
+
+    /// <summary>
+    /// Registers a callback to run AFTER all destination members are mapped. Multiple AfterMap
+    /// calls on the same map run in registration order (FIFO). With inheritance, derived hooks
+    /// run before base hooks (stack-unwind order — pairs with BeforeMap's base-first order).
+    /// </summary>
+    /// <remarks>See <see cref="BeforeMap(Action{TSource, TDestination})"/> for shared semantics.</remarks>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="hook"/> is null.</exception>
+    IMappingExpression<TSource, TDestination> AfterMap(Action<TSource, TDestination> hook);
+
+    /// <summary>
+    /// Registers a typed mapping-action class to run AFTER all destination members are mapped.
+    /// </summary>
+    /// <remarks>See <see cref="BeforeMap{TAction}"/> for resolution and lifetime semantics.</remarks>
+    IMappingExpression<TSource, TDestination> AfterMap<TAction>()
+        where TAction : IMappingAction<TSource, TDestination>;
 }

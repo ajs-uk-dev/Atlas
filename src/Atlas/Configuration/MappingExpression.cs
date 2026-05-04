@@ -200,6 +200,40 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         return this;
     }
 
+    // ---- Before/After hooks ----
+
+    public IMappingExpression<TSource, TDestination> BeforeMap(Action<TSource, TDestination> hook)
+    {
+        TypeMap.EnsureMutable();
+        ArgumentNullException.ThrowIfNull(hook);
+        TypeMap.BeforeHooks.Add(HookEntry.FromLambda(hook));
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> BeforeMap<TAction>()
+        where TAction : IMappingAction<TSource, TDestination>
+    {
+        TypeMap.EnsureMutable();
+        TypeMap.BeforeHooks.Add(HookEntry.FromActionType(typeof(TAction)));
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> AfterMap(Action<TSource, TDestination> hook)
+    {
+        TypeMap.EnsureMutable();
+        ArgumentNullException.ThrowIfNull(hook);
+        TypeMap.AfterHooks.Add(HookEntry.FromLambda(hook));
+        return this;
+    }
+
+    public IMappingExpression<TSource, TDestination> AfterMap<TAction>()
+        where TAction : IMappingAction<TSource, TDestination>
+    {
+        TypeMap.EnsureMutable();
+        TypeMap.AfterHooks.Add(HookEntry.FromActionType(typeof(TAction)));
+        return this;
+    }
+
     private EnumMapConfig EnsureEnumConfig() => TypeMap.EnumConfig ??= new EnumMapConfig();
 
     private static void EnsureBothEnums(string methodName)
