@@ -51,22 +51,35 @@ Add `.ReverseMap()` to Atlas's fluent surface so a single declaration produces b
 
 ### 2.2 Build-time sequence (revised)
 
+The current v1 order in `MapperConfiguration.cs` is `InheritanceMerger.Resolve → ConventionEngine.ResolveMissingMembers → tm.Seal()`. Mirror reads forward maps' RESOLVED bindings (the post-convention state), so it must run AFTER ConventionEngine. Inheritance is not relevant to reverse maps in scope A (Include is not auto-inverted), so Mirror's position relative to InheritanceMerger does not matter for correctness — but placing Mirror AFTER both keeps the rule simple ("Mirror is the last fill-in pass before Seal").
+
 ```
 1. Profile.Configure() ─ TypeMaps registered; .ReverseMap() registers reverse pair
                          and stores ReverseMapPair on the new TypeMap.
                          ForMember/ForPath/Ignore mark IsExplicit = true.
-2. ConventionEngine.Apply(registry) ─ populates non-explicit PropertyMaps on every
-                                      TypeMap (forward AND reverse). Discovers direct
-                                      and source-side flattening matches as today.
-3. ReverseMapMirror.Mirror(registry) ─ NEW. For each TypeMap with non-null
+2. ConfigExpression conflict-guard ─ NEW. At each TypeMap registration into the
+                                     ConfigExpression dictionary (the harvest from
+                                     profiles AND direct CreateMap calls), detect
+                                     duplicate-pair declarations where at least one
+                                     side has ReverseMapPair != null. Throw immediately
+                                     with both registration origins. v1 last-write-wins
+                                     contract preserved when neither side is a reverse.
+3. InheritanceMerger.Resolve(typeMaps) ─ unchanged.
+4. ConventionEngine.ResolveMissingMembers(tm) ─ unchanged. Populates non-explicit
+                                      PropertyMaps on every TypeMap (forward AND
+                                      reverse). Discovers direct and source-side
+                                      flattening matches as today.
+5. ReverseMapMirror.Mirror(typeMaps) ─ NEW. For each TypeMap with non-null
                                        ReverseMapPair, fill remaining unmapped reverse
                                        bindings from the forward map's resolved
                                        PropertyMaps with directions flipped.
-4. InheritanceMerger.Resolve(registry) ─ unchanged.
-5. ConfigurationValidator.Validate(registry, enumValidationEnabled) ─ extended with
-                                       intermediate-ctor and intermediate-setter checks
-                                       on any PropertyMap with DestinationPath.
-6. Seal all TypeMaps; CompileMappings() builds delegate cache.
+6. tm.Seal() for each TypeMap.
+7. ConfigurationValidator.Validate(registry, enumValidationEnabled) ─ called explicitly
+                                       by the user via AssertConfigurationIsValid().
+                                       Extended with intermediate-ctor and
+                                       intermediate-setter checks on any PropertyMap
+                                       with DestinationPath.
+8. CompileMappings() builds delegate cache (lazy or eager).
 ```
 
 ### 2.3 Runtime path
@@ -250,7 +263,9 @@ internal sealed class TypeMap
     /// <summary>
     /// When this map was created via <c>.ReverseMap()</c> on another map, points back
     /// to that forward pair. Used by <see cref="ReverseMapMirror"/> to know which
-    /// forward to read from. Null for maps registered directly via
+    /// forward to read from, AND by the conflict guard in
+    /// <see cref="MapperConfigurationExpression"/> to detect duplicate registrations.
+    /// Null for maps registered directly via
     /// <see cref="MapperProfile.CreateMap{TSource,TDestination}"/>.
     /// </summary>
     public TypePair? ReverseMapPair { get; set; }
@@ -263,6 +278,16 @@ internal sealed class TypeMap
     /// were never reversed.
     /// </summary>
     public object? CachedReverseExpression { get; set; }
+
+    /// <summary>
+    /// Human-readable origin string for diagnostic messages
+    /// (<c>"CreateMap&lt;Order, OrderDto&gt;()"</c> or
+    /// <c>"CreateMap&lt;Order, OrderDto&gt;().ReverseMap()"</c>). Set at construction in
+    /// <see cref="MapperProfile.CreateMap"/>, <see cref="MapperConfigurationExpression.CreateMap"/>,
+    /// and <c>MappingExpression.ReverseMap</c>. Empty string for TypeMaps constructed
+    /// in tests that don't care about the origin.
+    /// </summary>
+    public string RegistrationOrigin { get; set; } = string.Empty;
 }
 ```
 
@@ -331,47 +356,67 @@ internal static class ReverseMapMirror
 
 ### 5.4 `MapperConfiguration` integration
 
+The current v1 build sequence in `MapperConfiguration.cs:39-45` is `InheritanceMerger.Resolve → ConventionEngine.ResolveMissingMembers → tm.Seal`. The new `ReverseMapMirror.Mirror` slots in between Convention and Seal. The conflict guard runs in `MapperConfigurationExpression.RegisterTypeMap` (the harvest step) — it does NOT run inside `MapperConfiguration` constructor.
+
 ```csharp
-// In src\Atlas\MapperConfiguration.cs (excerpt of build sequence)
-public MapperConfiguration(MapperConfigurationExpression cfg)
+// In src\Atlas\MapperConfiguration.cs (revised constructor body)
+public MapperConfiguration(MapperConfigurationExpression expression)
 {
-    // ... profile execution populates _registry ...
+    // ... existing setup elided ...
 
-    ConventionEngine.Apply(_registry);
-    ReverseMapMirror.Mirror(_registry);          // NEW
-    InheritanceMerger.Resolve(_registry);
+    var typeMaps = expression.GetTypeMaps().ToList();
+    var pairIndex = typeMaps.ToDictionary(t => t.Pair);
+    bool HasRegisteredMap(Type s, Type d) => pairIndex.ContainsKey(new TypePair(s, d));
 
-    if (_validateOnBuild)
-        AssertConfigurationIsValid();
+    InheritanceMerger.Resolve(typeMaps, pairIndex);
 
-    foreach (var tm in _registry.AllTypeMaps())
+    foreach (var tm in typeMaps)
+        ConventionEngine.ResolveMissingMembers(tm, _conventionOptions, HasRegisteredMap);
+
+    ReverseMapMirror.Mirror(typeMaps);          // NEW
+
+    foreach (var tm in typeMaps)
         tm.Seal();
 
-    CompileMappings();
+    expression.MarkBuilt();
+    _registry = new MapperRegistry(typeMaps, _stringToEnumCache);
 }
 ```
 
 ### 5.5 Conflict guard
 
-The conflict guard fires at registration time (not validation time) so the user gets the error close to the call site. It lives in `MapperRegistry.Register` (the entry point used by both `CreateMap` and `.ReverseMap()`):
+The conflict guard runs at the harvest step into `MapperConfigurationExpression._typeMaps`. There is no `MapperRegistry` at the time of `.ReverseMap()` call — the registry is constructed inside `MapperConfiguration`'s constructor after all profiles have been processed. So the guard runs at the point where TypeMaps are assembled into the ConfigExpression's dictionary:
 
-```
-On Register(newTypeMap):
-    let pair = (newTypeMap.SourceType, newTypeMap.DestinationType)
-    if registry already contains a TypeMap for pair:
-        let existing = registry[pair]
-        if existing.ReverseMapPair == null AND newTypeMap.ReverseMapPair == null:
-            // two CreateMap calls — current behavior, idempotent / last-wins per existing v1 contract
-            // (preserve whatever the existing v1 behavior was — this design does not change it)
-        else:
-            // at least one side was a ReverseMap — that's the conflict case
+```csharp
+// In src\Atlas\MapperConfigurationExpression.cs — new private helper
+private void RegisterTypeMap(TypeMap newTm)
+{
+    if (_typeMaps.TryGetValue(newTm.Pair, out var existing))
+    {
+        var existingIsReverse = existing.ReverseMapPair is not null;
+        var newIsReverse = newTm.ReverseMapPair is not null;
+        if (existingIsReverse || newIsReverse)
+        {
             throw new AtlasConfigurationException(
-                $"Type pair ({pair.Source.Name}, {pair.Destination.Name}) is registered twice: " +
-                $"once via {DescribeOrigin(existing)} and once via {DescribeOrigin(newTypeMap)}. " +
-                $"Pick one. ReverseMap on the other direction's CreateMap, or remove the duplicate.");
+                $"Type pair ({newTm.SourceType.Name}, {newTm.DestinationType.Name}) is registered twice: " +
+                $"{existing.RegistrationOrigin} and {newTm.RegistrationOrigin}. " +
+                $"Pick one — either remove the duplicate, or rely solely on .ReverseMap() to produce the inverse.");
+        }
+        // Otherwise: preserve v1 last-write-wins behavior (silent overwrite).
+    }
+    _typeMaps[newTm.Pair] = newTm;
+}
 ```
 
-`DescribeOrigin` is `"CreateMap<S,D>()"` when `ReverseMapPair == null`, `"CreateMap<X,Y>().ReverseMap()"` (with X,Y being the forward pair) when `ReverseMapPair != null`. The plan must include the algorithm for both ordering cases — see §6.4.
+All paths that add to `_typeMaps` are routed through `RegisterTypeMap`:
+- `CreateMap<TSource, TDestination>(memberList)` directly on the expression.
+- `AddProfile(profile)` — iterates `profile.GetTypeMaps()` and registers each.
+- `AddMaps(assemblies)` — same as `AddProfile` after scanning.
+- The reverse TypeMap created by `MappingExpression<,>.ReverseMap()` — added via a sink delegate plumbed at construction time (see §6.5).
+
+`TypeMap.RegistrationOrigin` is a new string field set at TypeMap construction:
+- `CreateMap<S, D>()` sets `"CreateMap<S, D>()"`.
+- `MappingExpression<X, Y>.ReverseMap()` sets `"CreateMap<X, Y>().ReverseMap()"` (uses the forward pair's type names so the user can find it in their profile).
 
 ---
 
@@ -449,49 +494,99 @@ Note: the mirrored reverse `PropertyMap` does NOT have `IsExplicit = true`. It i
 
 ### 6.4 Conflict-guard algorithm — both ordering cases
 
-The guard runs at `MapperRegistry.Register` time. Two cases produce the conflict:
+The guard runs at `MapperConfigurationExpression.RegisterTypeMap` time (the harvest step). Two cases produce the conflict:
 
-**Case A: `CreateMap<D,S>()` then `CreateMap<S,D>().ReverseMap()`.**
-- Step: profile A registers `(D, S)` directly. Registry contains `(D, S)` with `ReverseMapPair == null`.
-- Step: profile B registers `(S, D)` directly. No conflict (different pair).
-- Step: profile B's fluent chain calls `.ReverseMap()` on the `(S, D)` map. This calls `Register(reverseTm)` where `reverseTm.SourceType = D, DestinationType = S, ReverseMapPair = (S, D)`.
-- Guard: registry already contains `(D, S)` with `ReverseMapPair == null`; new TypeMap has `ReverseMapPair != null`. Throw.
+**Case A: `CreateMap<D,S>()` somewhere, then `CreateMap<S,D>().ReverseMap()` somewhere.**
+- Step: profile A's `CreateMap<D,S>()` appends `(D, S)` with `ReverseMapPair == null` to profile A's local list.
+- Step: profile B's `CreateMap<S,D>()` appends `(S, D)` with `ReverseMapPair == null` to profile B's local list. `.ReverseMap()` then appends `(D, S)` with `ReverseMapPair = (S, D)` to profile B's local list (via the sink — see §6.5).
+- Step: ConfigExpression `.AddProfile(profileA)` → `RegisterTypeMap((D, S) {ReverseMapPair=null})` → no existing entry, dict[(D,S)] := this.
+- Step: ConfigExpression `.AddProfile(profileB)` → `RegisterTypeMap((S, D) {ReverseMapPair=null})` → no existing entry, dict[(S,D)] := this. → `RegisterTypeMap((D, S) {ReverseMapPair=(S,D)})` → existing entry has `ReverseMapPair == null`, new has `ReverseMapPair != null` → throw.
 
-**Case B: `CreateMap<S,D>().ReverseMap()` then `CreateMap<D,S>()`.**
-- Step: profile B registers `(S, D)`. Registry contains `(S, D)` with `ReverseMapPair == null`.
-- Step: profile B's fluent chain calls `.ReverseMap()`. Registers `(D, S)` with `ReverseMapPair = (S, D)`.
-- Step: profile A registers `(D, S)` directly. Calls `Register(newTm)` where `newTm.ReverseMapPair == null`.
-- Guard: registry already contains `(D, S)` with `ReverseMapPair != null`; new TypeMap has `ReverseMapPair == null`. Throw.
+**Case B: `CreateMap<S,D>().ReverseMap()` somewhere, then `CreateMap<D,S>()` somewhere.**
+- Step: ConfigExpression `.AddProfile(profileB)` → `RegisterTypeMap((S, D) {ReverseMapPair=null})` → no existing entry. → `RegisterTypeMap((D, S) {ReverseMapPair=(S,D)})` → no existing entry, dict[(D,S)] := this.
+- Step: ConfigExpression `.AddProfile(profileA)` → `RegisterTypeMap((D, S) {ReverseMapPair=null})` → existing entry has `ReverseMapPair != null`, new has `ReverseMapPair == null` → throw.
 
-The guard condition is symmetric: `(existing.ReverseMapPair == null) != (newTypeMap.ReverseMapPair == null)`. Both being null is the existing v1 "register twice" case (preserve its behavior). Both being non-null is a "two reverse maps for the same pair" case — also throw, with a message naming both forward pairs.
+The guard condition is symmetric: `existingIsReverse || newIsReverse` (i.e., at least one side has `ReverseMapPair != null`). Both being null is the existing v1 "register twice" case — preserved (silent last-write-wins). Both being non-null is a "two reverse maps for the same pair" case — throw with both forward-pair names in the message.
 
-### 6.5 Idempotency of `.ReverseMap()`
+**Within a single profile:** if a profile contains both `CreateMap<D,S>()` AND `CreateMap<S,D>().ReverseMap()`, the conflict is detected when `.AddProfile` harvests the profile's list — the third item triggers the guard. The user sees the same error message regardless of which order they wrote the calls within their profile.
 
-Implemented in `MappingExpression<TSource, TDestination>.ReverseMap`:
+### 6.5 Idempotency of `.ReverseMap()` and the sink
+
+`MappingExpression<TSource, TDestination>` gets a new constructor parameter: an `Action<TypeMap>?` sink. The sink is the function that "appends a TypeMap to whatever collection the parent owns." Profile passes `_typeMaps.Add` (the list's Add); ConfigExpression passes `RegisterTypeMap` (with the conflict guard). When `.ReverseMap()` creates a reverse TypeMap, it invokes the sink to make the parent take ownership.
 
 ```csharp
-public IMappingExpression<TDestination, TSource> ReverseMap(MemberList memberList = MemberList.None)
+internal sealed class MappingExpression<TSource, TDestination> : IMappingExpression<TSource, TDestination>
 {
-    TypeMap.EnsureMutable();
-    if (TypeMap.CachedReverseExpression is MappingExpression<TDestination, TSource> existing)
+    public TypeMap TypeMap { get; }
+    private readonly Action<TypeMap>? _sink;
+
+    public MappingExpression(TypeMap typeMap, Action<TypeMap>? sink = null)
     {
-        var existingMemberList = existing.TypeMap.MemberList;
-        if (existingMemberList != memberList)
-            throw new AtlasConfigurationException(
-                $"ReverseMap on ({typeof(TSource).Name}, {typeof(TDestination).Name}) was previously " +
-                $"called with MemberList.{existingMemberList}; cannot now call with MemberList.{memberList}.");
-        return existing;
+        TypeMap = typeMap;
+        _sink = sink;
     }
 
-    var reverseTm = _registry.GetOrCreateTypeMap(typeof(TDestination), typeof(TSource), memberList);
-    reverseTm.ReverseMapPair = new TypePair(typeof(TSource), typeof(TDestination));
-    var reverseExpr = new MappingExpression<TDestination, TSource>(reverseTm, _registry);
-    TypeMap.CachedReverseExpression = reverseExpr;
-    return reverseExpr;
+    public IMappingExpression<TDestination, TSource> ReverseMap(MemberList memberList = MemberList.None)
+    {
+        TypeMap.EnsureMutable();
+
+        if (TypeMap.CachedReverseExpression is MappingExpression<TDestination, TSource> existing)
+        {
+            var existingMemberList = existing.TypeMap.MemberList;
+            if (existingMemberList != memberList)
+                throw new AtlasConfigurationException(
+                    $"ReverseMap on ({typeof(TSource).Name}, {typeof(TDestination).Name}) was previously " +
+                    $"called with MemberList.{existingMemberList}; cannot now call with MemberList.{memberList}.");
+            return existing;
+        }
+
+        if (_sink is null)
+            throw new InvalidOperationException(
+                "ReverseMap can only be called on a MappingExpression created via MapperProfile.CreateMap " +
+                "or MapperConfigurationExpression.CreateMap (which provide a sink for the reverse TypeMap).");
+
+        var reverseTm = new TypeMap(typeof(TDestination), typeof(TSource), memberList)
+        {
+            ReverseMapPair = TypeMap.Pair,
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>().ReverseMap()",
+        };
+        _sink(reverseTm);
+
+        var reverseExpr = new MappingExpression<TDestination, TSource>(reverseTm, _sink);
+        TypeMap.CachedReverseExpression = reverseExpr;
+        return reverseExpr;
+    }
 }
 ```
 
-(`_registry` is plumbed into `MappingExpression` as a constructor parameter — small refactor — so the reverse-pair registration can flow through the same conflict guard. This is the only existing-API surface change to `MappingExpression`'s internals.)
+**Sink wiring** at construction sites:
+
+```csharp
+// MapperProfile.cs
+protected IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>(MemberList memberList = MemberList.Destination)
+{
+    var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
+    {
+        RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+    };
+    _typeMaps.Add(map);
+    return new MappingExpression<TSource, TDestination>(map, _typeMaps.Add);
+}
+
+// MapperConfigurationExpression.cs
+public IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>(MemberList memberList = MemberList.Destination)
+{
+    EnsureMutable();
+    var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
+    {
+        RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+    };
+    RegisterTypeMap(map);
+    return new MappingExpression<TSource, TDestination>(map, RegisterTypeMap);
+}
+```
+
+(Existing tests that construct `MappingExpression` directly without a sink continue to work — the sink defaults to `null` and only `.ReverseMap()` requires it. Existing tests don't call `.ReverseMap()`.)
 
 ---
 
@@ -674,7 +769,7 @@ Roughly 10 implementation tasks, ~45 new tests. Same TDD-first cadence as Inheri
 | 3 | `ExecutionPlanBuilder.BuildNestedAssign` + `DestinationPath` route | 4 | sonnet |
 | 4 | `ConfigurationValidator` path-ctor + setter checks | 5 | sonnet |
 | 5 | `ReverseMap` fluent surface; cache reverse expression on forward TypeMap; idempotent | 6 | sonnet |
-| 6 | Conflict guard at `MapperRegistry.Register` time; `DescribeOrigin` helper | 4 | haiku |
+| 6 | Conflict guard at `MapperConfigurationExpression.RegisterTypeMap`; `RegistrationOrigin` field on TypeMap | 4 | haiku |
 | 7 | `Internal/ReverseMapMirror.cs` — Mirror algorithm covering all skip conditions | 10 | sonnet |
 | 8 | Wire `ReverseMapMirror.Mirror` into `MapperConfiguration` build sequence | 0 | haiku |
 | 9 | End-to-end `MapperReverseMapTests` (round-trip, unflattening, ForPath override, MemberList interactions) | 8 | sonnet |
@@ -688,9 +783,9 @@ Roughly 10 implementation tasks, ~45 new tests. Same TDD-first cadence as Inheri
 
 ### 9.1 Things to trace concretely during plan-writing (per pseudocode-trace memory)
 
-1. **Mirror ordering in the build sequence.** Mirror must run AFTER `ConventionEngine.Apply` (forward `SourcePath`s must be resolved) and BEFORE `InheritanceMerger.Resolve` (so that if both a base and a derived map were registered with `.ReverseMap()`, inheritance can propagate mirrored bindings into the derived reverse). The plan must include an explicit trace: a 3-level inheritance chain with one of the bases having a `.ReverseMap()` call, verifying mirror runs at the right point.
+1. **Mirror ordering in the build sequence.** The current v1 order in `MapperConfiguration.cs:39-45` is `InheritanceMerger.Resolve → ConventionEngine.ResolveMissingMembers → tm.Seal()`. Mirror reads forward maps' RESOLVED bindings (the post-convention state), so it must run AFTER `ConventionEngine.ResolveMissingMembers`. In scope A, `Include` is not auto-inverted, so reverse maps have no `IncludedDerived`/`IncludedBases` relations — `InheritanceMerger.Resolve` is effectively a no-op on reverse maps and Mirror's position relative to it does not matter for correctness. The plan places Mirror AFTER both Inheritance and Convention, just before Seal: simplest rule, no surprises. Concrete trace required: a 2-level forward inheritance chain (Base→BaseDto, Derived→DerivedDto with Derived map having .ReverseMap()) — verify the Derived reverse gets only Derived's flattening bindings mirrored, not Base's (because Mirror reads `forward.PropertyMaps` which after Inheritance+Convention contains both base-inherited and derived-explicit bindings — that's actually what we WANT, but the trace needs to confirm the test assertion matches reality).
 
-2. **Conflict-guard for both ordering cases.** Pseudocode in §6.4 enumerates Case A (CreateMap-then-ReverseMap) and Case B (ReverseMap-then-CreateMap). The plan must trace BOTH cases through `MapperRegistry.Register` to verify the symmetric condition `(existing.ReverseMapPair == null) != (newTypeMap.ReverseMapPair == null)` triggers both.
+2. **Conflict-guard for both ordering cases.** Pseudocode in §6.4 enumerates Case A (CreateMap-then-ReverseMap) and Case B (ReverseMap-then-CreateMap). The plan must trace BOTH cases through `MapperConfigurationExpression.RegisterTypeMap` to verify the symmetric condition `existingIsReverse || newIsReverse` triggers both. ALSO trace the within-single-profile case: a profile that contains both `CreateMap<D,S>()` and `CreateMap<S,D>().ReverseMap()` — the harvest into ConfigExpression detects the conflict at the third item (the reverse-pair add).
 
 3. **Idempotency cache — different MemberList second call.** §6.5 shows the throw on different MemberList. Trace required: first call `.ReverseMap()` (default `None`), second call `.ReverseMap(MemberList.Destination)` — must throw with both MemberLists in the message. If the second call passes the same MemberList as the first, return the cached expression silently.
 
@@ -698,11 +793,11 @@ Roughly 10 implementation tasks, ~45 new tests. Same TDD-first cadence as Inheri
 
 5. **ConventionEngine running on the reverse pre-mirror.** Step 2 (ConventionEngine) runs on ALL TypeMaps including reverse. ConventionEngine populates non-explicit bindings — for the reverse, this picks up direct/single-level matches like `OrderTotal → OrderTotal`. Then mirror fills the gaps. The skip-rule-1 in §6.1 (`pm.Name == mirrored.Name`) handles this: convention-resolved single-level matches survive and mirror does not double-write. Concrete trace: forward `Order → OrderDto` with `OrderTotal` as a direct convention match AND `Customer.Name → CustomerName` as flattening. After ConventionEngine, reverse has `[OrderTotal direct]`; after Mirror, reverse has `[OrderTotal direct, Customer.Name from CustomerName via mirror]`. Verify mirror does not double-write OrderTotal.
 
-8. **Mirror does not overwrite user-explicit top-level bindings.** Skip-rule-2 in §6.1 handles `ReverseMap().ForMember(d => d.Customer, opt => opt.MapFrom(s => GetCustomerById(s.Id)))` — the user wholesale-replaced Customer and does not want mirror to add `Customer.Name`/`Customer.Email` bindings that would overwrite Name/Email on the customer they just constructed. Concrete trace required: forward Order→OrderDto with two flattening bindings and a reverse `ForMember(d => d.Customer, ...)`. Verify mirror skips both `Customer.Name` and `Customer.Email` because skip-rule-2 finds a user-explicit binding for `Customer`. The skip rule does NOT fire if the top-level binding is convention-resolved (only IsExplicit==true triggers the skip), so a future case where convention happens to resolve the top intermediate doesn't accidentally suppress mirror.
+6. **Mirror does not overwrite user-explicit top-level bindings.** Skip-rule-2 in §6.1 handles `ReverseMap().ForMember(d => d.Customer, opt => opt.MapFrom(s => GetCustomerById(s.Id)))` — the user wholesale-replaced Customer and does not want mirror to add `Customer.Name`/`Customer.Email` bindings that would overwrite Name/Email on the customer they just constructed. Concrete trace required: forward Order→OrderDto with two flattening bindings and a reverse `ForMember(d => d.Customer, ...)`. Verify mirror skips both `Customer.Name` and `Customer.Email` because skip-rule-2 finds a user-explicit binding for `Customer`. The skip rule does NOT fire if the top-level binding is convention-resolved (only IsExplicit==true triggers the skip), so a future case where convention happens to resolve the top intermediate doesn't accidentally suppress mirror.
 
-6. **Foot-gun guard placement.** The intermediate parameterless-ctor check fires in `ConfigurationValidator.Validate`, which is called by both `AssertConfigurationIsValid()` and `MapperConfiguration` constructor (when validate-on-build is enabled). But `CompileMappings()` calls `Expression.New(ctor)` unconditionally — if the validator wasn't run (e.g., user didn't call `AssertConfigurationIsValid()` and validate-on-build is off), compilation will throw a less-helpful error. The plan should specify: the path-ctor check is always-on inside the `BuildNestedAssign` precondition (mirroring how the enum surface added always-on validation rules in `ValidateEnum`), not gated on `enumValidationEnabled`. Consider also throwing a clear message from `ExecutionPlanBuilder` itself (defense in depth) if the ctor lookup fails.
+7. **Foot-gun guard placement.** The intermediate parameterless-ctor check fires in `ConfigurationValidator.Validate`, which is called by `AssertConfigurationIsValid()`. But `CompileMappings()` calls `Expression.New(ctor)` unconditionally — if the user did not call `AssertConfigurationIsValid()`, compilation throws an `InvalidOperationException` from `BuildNestedAssign`'s null-check fallback (see §7.2) rather than a clear validator message. The plan should add the path-ctor check INSIDE the always-on portion of `ConfigurationValidator.Validate` (not gated on `enumValidationEnabled`), AND keep the defense-in-depth `InvalidOperationException` in `BuildNestedAssign` so even users who skip validation get a comprehensible runtime error rather than an opaque ExpressionTree exception.
 
-7. **Reverse map's `MemberList.Destination` and the DestinationPath leaf-vs-top question.** Following from (4): if the user opts a reverse map into `MemberList.Destination`, what counts as covered by the unflattening bindings? Must trace concretely: reverse map of `OrderDto → Order`, MemberList=Destination, Order has `{ Id, Customer, Subtotal, Tax }`, mirror produced `{ Customer.Name <- CustomerName, Customer.Email <- CustomerEmail }`. Coverage walk should consider `Customer` covered (because `path[0] == Customer`), Id/Subtotal/Tax unmapped — three errors. Without this rule, ALL of Order's members would show as unmapped including `Customer` — the user would see a confusing "Customer is unmapped" error even though they're writing into it.
+8. **Reverse map's `MemberList.Destination` and the DestinationPath leaf-vs-top question.** Following from (4): if the user opts a reverse map into `MemberList.Destination`, what counts as covered by the unflattening bindings? Must trace concretely: reverse map of `OrderDto → Order`, MemberList=Destination, Order has `{ Id, Customer, Subtotal, Tax }`, mirror produced `{ Customer.Name <- CustomerName, Customer.Email <- CustomerEmail }`. Coverage walk should consider `Customer` covered (because `path[0] == Customer`), Id/Subtotal/Tax unmapped — three errors. Without this rule, ALL of Order's members would show as unmapped including `Customer` — the user would see a confusing "Customer is unmapped" error even though they're writing into it.
 
 ### 9.2 Explicitly deferred to v3
 
@@ -717,7 +812,7 @@ Roughly 10 implementation tasks, ~45 new tests. Same TDD-first cadence as Inheri
 
 ### 9.3 Open questions for the implementing session to push back on
 
-- **`Register` behavior when both new and existing have `ReverseMapPair == null`.** §5.5 says "preserve whatever the existing v1 behavior is." The plan should verify what v1 actually does (last-wins? throw? merge?) by reading the existing `MapperRegistry.Register` and `MapperProfile.CreateMap` code, and document it. If v1 throws on duplicate, then the new conflict guard becomes a special case of the existing throw (with a more specific message). If v1 last-wins, the new guard introduces a new error case; that's still correct but the contrast may surprise users.
+- **v1 duplicate-pair behavior — verified.** Reading `MapperConfigurationExpression.cs:34` confirms v1 is last-write-wins: `_typeMaps[map.Pair] = map; // last call wins`. The new conflict guard preserves this for the `existingIsReverse == false && newIsReverse == false` case (silent overwrite) and adds the throw only when at least one side is a reverse-mapping. No behavior change for v1 users who don't touch `.ReverseMap()`.
 
 ---
 
@@ -777,9 +872,9 @@ Reverse PropertyMaps now:
 
 `Id`, `Subtotal`, `Tax` remain unmapped on the reverse — fine because `MemberList.None`.
 
-**Step 4 — InheritanceMerger.Resolve.** No `Include` calls; no-op.
+**Step 4 — InheritanceMerger.Resolve (runs before Convention in v1; shown here in execution order for clarity).** No `Include` calls; no-op. (Steps 2+3 above describe Convention and Mirror — Inheritance actually ran BEFORE them; the section is laid out logically here, not chronologically. See §2.2 for the actual chronological order.)
 
-**Step 5 — ConfigurationValidator.Validate.**
+**Step 5 — ConfigurationValidator.Validate** (called by `AssertConfigurationIsValid()`).
 
 - Forward map (`MemberList.Destination`): every OrderDto member covered. Pass.
 - Reverse map (`MemberList.None`): no coverage check.
