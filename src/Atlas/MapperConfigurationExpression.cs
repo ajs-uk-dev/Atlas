@@ -26,6 +26,20 @@ public sealed class MapperConfigurationExpression
     /// </summary>
     public void EnableEnumMappingValidation() => EnumValidationEnabled = true;
 
+    /// <summary>
+    /// Global value transformers — post-processing functions applied to every value of a
+    /// given destination type, regardless of which map produces it. Composed broad-first
+    /// (global → profile → type-map) with finer-scope transformers running after broader
+    /// ones. Within this scope, transformers run in registration order (FIFO).
+    /// </summary>
+    /// <remarks>
+    /// Transformers are stored as <c>Expression&lt;Func&lt;T, T&gt;&gt;</c> so the same
+    /// declaration works for both in-memory <see cref="IMapper.Map{TDestination}"/> (compiled
+    /// to a delegate) and <c>query.ProjectTo&lt;T&gt;()</c> (inlined into the projection
+    /// lambda for SQL translation by the underlying provider).
+    /// </remarks>
+    public ValueTransformerCollection ValueTransformers { get; } = new();
+
     public IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>(
         MemberList memberList = MemberList.Destination)
     {
