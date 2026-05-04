@@ -39,6 +39,16 @@ internal static class InheritanceMerger
             }
             // else: derived is explicit — keep it as-is.
         }
+
+        // Hook merge.
+        // BeforeHooks: prepend base's hooks so they run FIRST at runtime (base-first).
+        if (baseTm.BeforeHooks.Count > 0)
+            derivedTm.BeforeHooks.InsertRange(0, baseTm.BeforeHooks);
+
+        // AfterHooks: append base's hooks so they run LAST at runtime (stack-unwind order:
+        // derived's AfterHooks fire first, then base's).
+        if (baseTm.AfterHooks.Count > 0)
+            derivedTm.AfterHooks.AddRange(baseTm.AfterHooks);
     }
 
     private static void CopyConfig(PropertyMap source, PropertyMap target)

@@ -63,6 +63,21 @@ internal sealed class TypeMap
     /// </summary>
     public string RegistrationOrigin { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Hooks that run BEFORE any destination member is mapped, in FIFO order (registration
+    /// order at the user's call site). After <c>InheritanceMerger</c> runs, this list also
+    /// contains base TypeMaps' BeforeHooks prepended at the front (base-first order).
+    /// </summary>
+    public List<HookEntry> BeforeHooks { get; } = new();
+
+    /// <summary>
+    /// Hooks that run AFTER all destination members are mapped, in FIFO order. After
+    /// <c>InheritanceMerger</c> runs, this list also contains base TypeMaps' AfterHooks
+    /// appended at the end (so unwind goes derived-first then base-last, pairing with
+    /// <see cref="BeforeHooks"/>'s base-first order).
+    /// </summary>
+    public List<HookEntry> AfterHooks { get; } = new();
+
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
 

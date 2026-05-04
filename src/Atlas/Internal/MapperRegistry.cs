@@ -14,10 +14,29 @@ internal sealed class MapperRegistry
 
     public StringToEnumCache StringToEnumCache { get; }
 
-    public MapperRegistry(IEnumerable<TypeMap> typeMaps, StringToEnumCache? stringToEnumCache = null)
+    /// <summary>
+    /// The application's root <see cref="IServiceProvider"/> when Atlas is registered through
+    /// <c>Atlas.Extensions.DependencyInjection</c>; otherwise <c>null</c>. Used by
+    /// <c>HookResolver</c> to instantiate <see cref="IMappingAction{TSource,TDestination}"/>
+    /// implementations via <c>ActivatorUtilities.CreateInstance</c>.
+    /// </summary>
+    public IServiceProvider? ServiceProvider { get; }
+
+    /// <summary>
+    /// Cached <see cref="IMappingAction{TSource, TDestination}"/> instances keyed by action type.
+    /// Populated by <c>HookResolver</c> at codegen time; one entry per distinct action type
+    /// regardless of how many TypeMaps reference it.
+    /// </summary>
+    internal Dictionary<Type, object> ActionInstances { get; } = new();
+
+    public MapperRegistry(
+        IEnumerable<TypeMap> typeMaps,
+        StringToEnumCache? stringToEnumCache = null,
+        IServiceProvider? serviceProvider = null)
     {
         _typeMaps = typeMaps.ToDictionary(t => t.Pair);
         StringToEnumCache = stringToEnumCache ?? new StringToEnumCache();
+        ServiceProvider = serviceProvider;
     }
 
     public TypeMap? GetTypeMap(TypePair pair) =>

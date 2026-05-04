@@ -24,6 +24,8 @@ internal static class ProjectionPlanBuilder
 
     private static Expression BuildBody(TypeMap tm, Expression srcExpr, int depth, MapperRegistry registry, int maxDepth)
     {
+        RejectHooksOrThrow(tm);
+
         var (ctor, ctorParamMaps, propertyMaps) = ClassifyBindings(tm);
 
         Expression newExpr;
@@ -204,6 +206,16 @@ internal static class ProjectionPlanBuilder
             }
         }
         return current;
+    }
+
+    private static void RejectHooksOrThrow(TypeMap tm)
+    {
+        if (tm.BeforeHooks.Count == 0 && tm.AfterHooks.Count == 0) return;
+        throw new AtlasProjectionException(new List<ProjectionDiagnostic>
+        {
+            new(tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable. Use mapper.Map<>() instead, or remove the hooks.")
+        });
     }
 
     private static (ConstructorInfo ctor,

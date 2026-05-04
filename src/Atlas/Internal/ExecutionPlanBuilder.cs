@@ -140,6 +140,10 @@ internal static class ExecutionPlanBuilder
 
         var statements = new List<Expression>();
 
+        // NEW: emit BeforeHooks.
+        foreach (var hookEntry in typeMap.BeforeHooks)
+            statements.Add(BuildHookCall(hookEntry, srcParam, destParam, registry));
+
         foreach (var pm in typeMap.PropertyMaps)
         {
             if (pm.Ignored) continue;
@@ -159,6 +163,10 @@ internal static class ExecutionPlanBuilder
                     sourceExpr));
             }
         }
+
+        // NEW: emit AfterHooks.
+        foreach (var hookEntry in typeMap.AfterHooks)
+            statements.Add(BuildHookCall(hookEntry, srcParam, destParam, registry));
 
         Expression body = statements.Count > 0
             ? Expression.Block(statements)
@@ -212,6 +220,10 @@ internal static class ExecutionPlanBuilder
             Expression.Assign(destVar, newDest),
         };
 
+        // NEW: emit BeforeHooks (FIFO order).
+        foreach (var hookEntry in typeMap.BeforeHooks)
+            statements.Add(BuildHookCall(hookEntry, srcParam, destVar, registry));
+
         foreach (var pm in propertyMaps)
         {
             if (pm.Ignored) continue;
@@ -231,6 +243,10 @@ internal static class ExecutionPlanBuilder
                     sourceExpr));
             }
         }
+
+        // NEW: emit AfterHooks (FIFO order).
+        foreach (var hookEntry in typeMap.AfterHooks)
+            statements.Add(BuildHookCall(hookEntry, srcParam, destVar, registry));
 
         statements.Add(destVar);
 
@@ -493,6 +509,23 @@ internal static class ExecutionPlanBuilder
         statements.Add(Expression.Assign(leafAccess, valueExpr));
 
         return Expression.Block(statements);
+    }
+
+    private static Expression BuildHookCall(
+        HookEntry entry,
+        Expression srcExpr,
+        Expression destExpr,
+        MapperRegistry registry)
+    {
+        var srcType = srcExpr.Type;
+        var dstType = destExpr.Type;
+        var resolveMethod = typeof(HookResolver)
+            .GetMethod(nameof(HookResolver.Resolve), BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(srcType, dstType);
+        var typedDelegate = (Delegate)resolveMethod.Invoke(null, new object?[] { entry, registry })!;
+
+        // Emit: typedDelegate.Invoke(src, dest)
+        return Expression.Invoke(Expression.Constant(typedDelegate), srcExpr, destExpr);
     }
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor

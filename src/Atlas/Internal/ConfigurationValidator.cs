@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Atlas.Internal;
 
@@ -9,7 +10,10 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class ConfigurationValidator
 {
-    public static void Validate(MapperRegistry registry, bool enumValidationEnabled = false)
+    public static void Validate(
+        MapperRegistry registry,
+        bool enumValidationEnabled = false,
+        IServiceProvider? serviceProvider = null)
     {
         var errors = new List<ConfigurationError>();
         foreach (var tm in registry.AllTypeMaps)
@@ -19,6 +23,9 @@ internal static class ConfigurationValidator
 
             // Path rules (always-on; covers ForPath / mirrored unflatten paths).
             ValidatePaths(tm, errors);
+
+            // Hook rules (always-on; covers BeforeMap/AfterMap action-type validation).
+            ValidateHooks(tm, serviceProvider, errors);
 
             // Strict-mode enum source-side coverage (Task 9).
             if (enumValidationEnabled)
@@ -243,6 +250,42 @@ internal static class ConfigurationValidator
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, pm.Name,
                     $"Cannot write to leaf {leaf.DeclaringType?.Name}.{leaf.Name}: property has no public setter."));
+            }
+        }
+    }
+
+    private static void ValidateHooks(TypeMap tm, IServiceProvider? sp, List<ConfigurationError> errors)
+    {
+        foreach (var entry in tm.BeforeHooks.Concat(tm.AfterHooks))
+        {
+            if (entry.ActionType is null) continue;   // lambda entries are always valid
+
+            var actionType = entry.ActionType;
+
+            // 1. Interface implementation check.
+            var expectedInterface = typeof(IMappingAction<,>).MakeGenericType(tm.SourceType, tm.DestinationType);
+            if (!expectedInterface.IsAssignableFrom(actionType))
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                    $"Action type {actionType.Name} does not implement IMappingAction<{tm.SourceType.Name}, {tm.DestinationType.Name}>."));
+                continue;
+            }
+
+            // 2. Eager construction check.
+            try
+            {
+                _ = sp is not null
+                    ? ActivatorUtilities.CreateInstance(sp, actionType)
+                    : Activator.CreateInstance(actionType);
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                    $"Action type {actionType.Name} construction failed: {ex.Message}. " +
+                    "When Atlas is used without the DI extension, the action must have a public parameterless constructor. " +
+                    "When using DI, ensure all constructor dependencies are registered as singleton or transient (scoped services are not supported)."));
             }
         }
     }

@@ -175,6 +175,60 @@ on either direction to override or configure nested chains explicitly:
 
 > **Note:** an explicit `.ForMember(d => d.X, ...)` on the reverse map suppresses mirroring of any `X.*` flattened bindings — the user is treated as writing X wholesale. Use `.ForPath(d => d.X.Y, ...)` instead if you want to override one leaf while keeping the other mirrored bindings active.
 
+## Before/after hooks
+
+Run code at well-defined points around each mapping. Two flavors per direction:
+
+```csharp
+public class OrderProfile : MapperProfile
+{
+    public OrderProfile()
+    {
+        CreateMap<Order, OrderDto>()
+            .BeforeMap((s, d) => s.NormalizeFields())   // inline lambda
+            .AfterMap<AuditAction>();                    // DI-friendly action
+    }
+}
+
+public sealed class AuditAction : IMappingAction<Order, OrderDto>
+{
+    private readonly ILogger<AuditAction> _log;
+    public AuditAction(ILogger<AuditAction> log) => _log = log;
+    public void Process(Order src, OrderDto dst) =>
+        _log.LogInformation("Mapped Order {Id}", src.Id);
+}
+```
+
+Multiple hooks per direction run in registration order (FIFO). With `Include`/`IncludeBase`,
+base hooks fire BEFORE derived hooks for `BeforeMap`, and AFTER derived hooks for `AfterMap`
+(stack-unwind order — pairs cleanly with try/finally-style intent).
+
+Hooks fire on every `Map<>()` call (including update-in-place) and on every per-element
+invocation when mapping a collection.
+
+**DI integration.** When Atlas is registered through `AddAtlas(...)`, `IMappingAction`
+implementations are instantiated via `ActivatorUtilities.CreateInstance` from the root
+service provider — constructor-injecting singleton and transient services. Without DI, the
+action type must have a public parameterless constructor.
+
+**Limitation:** scoped services (HTTP context, current user, scoped EF DbContext) are NOT
+supported because actions are resolved from the root provider and cached. For HTTP-context-aware
+logic, inject `IHttpContextAccessor` (which is itself singleton-resolvable) and read the
+per-request context inside `Process`.
+
+**Foot-gun guards** (caught by `AssertConfigurationIsValid`):
+- Action types must implement `IMappingAction<TSource, TDestination>` matching the map's pair.
+- Without DI, action types require a public parameterless constructor.
+- With DI, scoped-service dependencies surface as a clear error at validate time (when the SP is built with `ValidateScopes = true`).
+
+**ProjectTo limitation.** Hooks are not translatable to IQueryable. Calling
+`query.ProjectTo<TDestination>()` against a map with any hooks throws
+`AtlasProjectionException` at projection-build time naming the hook count and pointing
+to `Map<>()` instead.
+
+**Hooks do NOT auto-propagate via `.ReverseMap()`** — configure hooks on the reverse
+expression separately if needed.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -198,7 +252,6 @@ on either direction to override or configure nested chains explicitly:
 
 Each of these has its own design doc to be written separately:
 
-- Before/after hooks, value transformers
 - Conditional mapping (`Condition`, `PreCondition`)
 - Null substitution
 - Open generics
@@ -230,9 +283,9 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 94.3% | 82.7% | Met. Reverse mapping adds `ReverseMapMirror`, unflatten `ForPath` paths, and conflict-guard coverage. |
-| `Atlas.Extensions.DependencyInjection` | 92.9% | 100% | Met. |
-| `Atlas.Projections` | 93.9% | 83.6% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
+| `Atlas` | 95.2% | 82.8% | Met. Before/after hooks add `HookResolver`, `HookEntry`, and `MappingInvoker` coverage. |
+| `Atlas.Extensions.DependencyInjection` | 90.0% | 100% | Met. |
+| `Atlas.Projections` | 96.9% | 83.6% | Met. Hooks-rejection path adds `ProjectionCompatibility` and `ProjectionValidator` branch coverage. |
 
 ## License
 

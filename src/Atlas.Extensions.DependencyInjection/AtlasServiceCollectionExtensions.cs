@@ -28,17 +28,19 @@ public static class AtlasServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var expression = new MapperConfigurationExpression();
-        configure?.Invoke(expression);
+        services.AddSingleton<MapperConfiguration>(sp =>
+        {
+            var expression = new MapperConfigurationExpression();
+            configure?.Invoke(expression);
 
-        foreach (var profile in ProfileScanner.Discover(assemblies))
-            expression.AddProfile(profile);
+            foreach (var profile in ProfileScanner.Discover(assemblies))
+                expression.AddProfile(profile);
 
-        var configuration = new MapperConfiguration(expression);
-        configuration.CompileMappings();
-
-        services.AddSingleton(configuration);
-        services.AddSingleton<IMapper>(_ => configuration.CreateMapper());
+            var configuration = new MapperConfiguration(expression, sp);
+            configuration.CompileMappings();
+            return configuration;
+        });
+        services.AddSingleton<IMapper>(sp => sp.GetRequiredService<MapperConfiguration>().CreateMapper());
         return services;
     }
 
