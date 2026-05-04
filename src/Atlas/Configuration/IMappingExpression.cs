@@ -230,4 +230,31 @@ public interface IMappingExpression<TSource, TDestination>
     /// <remarks>See <see cref="BeforeMap{TAction}"/> for resolution and lifetime semantics.</remarks>
     IMappingExpression<TSource, TDestination> AfterMap<TAction>()
         where TAction : IMappingAction<TSource, TDestination>;
+
+    // ---- Value transformers ----
+
+    /// <summary>
+    /// Registers a value transformer scoped to this map only. Composed AFTER any global
+    /// (<see cref="MapperConfigurationExpression.ValueTransformers"/>) and profile-level
+    /// (<see cref="MapperProfile.ValueTransformers"/>) transformers for the same type.
+    /// Multiple <c>AddTransform&lt;T&gt;</c> calls on the same map run in registration
+    /// order (FIFO) within the type-map scope.
+    /// </summary>
+    /// <remarks>
+    /// The transformer is stored as <c>Expression&lt;Func&lt;T, T&gt;&gt;</c> so it
+    /// participates in both in-memory mapping and IQueryable projection. Lambdas using
+    /// constructs the underlying LINQ provider can't translate (custom static method calls,
+    /// captures of mutable state, etc.) will fail at query execution time with the
+    /// provider's standard "expression cannot be translated" error — Atlas does not
+    /// pre-inspect lambdas for translatability.
+    /// <para>
+    /// Transformers fire on every property assignment of type <typeparamref name="T"/>
+    /// within this map's compiled lambda, including constructor parameter assignments and
+    /// nested-path destination writes (<c>ForPath</c>). Transformers do NOT auto-propagate
+    /// across <c>.ReverseMap()</c> or <c>Include</c>/<c>IncludeBase</c>; reconfigure on the
+    /// reverse expression or derived map separately if needed.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="transformer"/> is null.</exception>
+    IMappingExpression<TSource, TDestination> AddTransform<T>(Expression<Func<T, T>> transformer);
 }

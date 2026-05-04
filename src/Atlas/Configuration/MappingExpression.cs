@@ -234,6 +234,23 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         return this;
     }
 
+    // ---- Value transformers ----
+
+    public IMappingExpression<TSource, TDestination> AddTransform<T>(Expression<Func<T, T>> transformer)
+    {
+        TypeMap.EnsureMutable();
+        ArgumentNullException.ThrowIfNull(transformer);
+
+        var key = typeof(T);
+        if (!TypeMap.TypeMapTransformers.TryGetValue(key, out var list))
+        {
+            list = new List<LambdaExpression>();
+            TypeMap.TypeMapTransformers[key] = list;
+        }
+        list.Add(transformer);
+        return this;
+    }
+
     private EnumMapConfig EnsureEnumConfig() => TypeMap.EnumConfig ??= new EnumMapConfig();
 
     private static void EnsureBothEnums(string methodName)
