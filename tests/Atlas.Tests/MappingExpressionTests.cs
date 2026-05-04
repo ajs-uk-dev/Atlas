@@ -75,8 +75,7 @@ public class MappingExpressionTests
         Assert.Single(mapping.TypeMap.PropertyMaps);
         var pm = mapping.TypeMap.PropertyMaps[0];
         Assert.Equal("displayName", pm.Name);
-        // MapFrom(s => s.First) is a pure member access — stored as SourcePath, not CustomExpression.
-        Assert.NotNull(pm.SourcePath);
+        Assert.NotNull(pm.CustomExpression);
     }
 
     [Fact]

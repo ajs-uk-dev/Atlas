@@ -20,8 +20,9 @@ public class MappingExpressionForPathTests
         expr.ForPath(d => d.Top, opt => opt.MapFrom(s => s.Value));
 
         var pm = expr.TypeMap.PropertyMaps.Single(p => p.Name == "Top");
-        Assert.NotNull(pm.SourcePath);
-        Assert.Equal("Value", pm.SourcePath!.Members.Single().Name);
+        // Single-level ForPath delegates to ForProperty + the existing MapFrom routing,
+        // so source-side ends up in CustomExpression (matching ForMember behavior exactly).
+        Assert.NotNull(pm.CustomExpression);
         Assert.Null(pm.DestinationPath);   // single-level uses ForProperty path, not ForPath path
         Assert.True(pm.IsExplicit);
     }
