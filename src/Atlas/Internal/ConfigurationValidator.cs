@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Atlas.Internal;
 
@@ -9,7 +10,10 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class ConfigurationValidator
 {
-    public static void Validate(MapperRegistry registry, bool enumValidationEnabled = false)
+    public static void Validate(
+        MapperRegistry registry,
+        bool enumValidationEnabled = false,
+        IServiceProvider? serviceProvider = null)
     {
         var errors = new List<ConfigurationError>();
         foreach (var tm in registry.AllTypeMaps)
@@ -19,6 +23,9 @@ internal static class ConfigurationValidator
 
             // Path rules (always-on; covers ForPath / mirrored unflatten paths).
             ValidatePaths(tm, errors);
+
+            // Hook rules (always-on; covers BeforeMap/AfterMap action-type validation).
+            ValidateHooks(tm, serviceProvider, errors);
 
             // Strict-mode enum source-side coverage (Task 9).
             if (enumValidationEnabled)
@@ -244,6 +251,111 @@ internal static class ConfigurationValidator
                     tm.SourceType, tm.DestinationType, pm.Name,
                     $"Cannot write to leaf {leaf.DeclaringType?.Name}.{leaf.Name}: property has no public setter."));
             }
+        }
+    }
+
+    private static void ValidateHooks(TypeMap tm, IServiceProvider? sp, List<ConfigurationError> errors)
+    {
+        // When a DI service provider is supplied, extract registered descriptors (if available)
+        // so that scoped-lifetime constructor dependencies can be detected early.
+        var descriptors = sp is not null ? TryGetServiceDescriptors(sp) : null;
+
+        foreach (var entry in tm.BeforeHooks.Concat(tm.AfterHooks))
+        {
+            if (entry.ActionType is null) continue;   // lambda entries are always valid
+
+            var actionType = entry.ActionType;
+
+            // 1. Interface implementation check.
+            var expectedInterface = typeof(IMappingAction<,>).MakeGenericType(tm.SourceType, tm.DestinationType);
+            if (!expectedInterface.IsAssignableFrom(actionType))
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                    $"Action type {actionType.Name} does not implement IMappingAction<{tm.SourceType.Name}, {tm.DestinationType.Name}>."));
+                continue;
+            }
+
+            // 2. Scoped-dependency check (when descriptor metadata is available).
+            //    Scoped services cannot be resolved from the root provider at mapping time.
+            if (descriptors is not null)
+            {
+                var ctor = actionType
+                    .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                    .OrderByDescending(c => c.GetParameters().Length)
+                    .FirstOrDefault();
+
+                if (ctor is not null)
+                {
+                    foreach (var param in ctor.GetParameters())
+                    {
+                        var scopedDescriptor = Array.Find(descriptors, d =>
+                            d.ServiceType == param.ParameterType &&
+                            d.Lifetime == ServiceLifetime.Scoped);
+
+                        if (scopedDescriptor is not null)
+                        {
+                            errors.Add(new ConfigurationError(
+                                tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                                $"Action type {actionType.Name} construction failed: constructor parameter " +
+                                $"'{param.ParameterType.Name}' is registered as a scoped service. " +
+                                "When using DI, ensure all constructor dependencies are registered as singleton or transient (scoped services are not supported)."));
+                            goto nextEntry;
+                        }
+                    }
+                }
+            }
+
+            // 3. Eager construction check (catches missing parameterless ctor without DI,
+            //    and other construction failures).
+            try
+            {
+                _ = sp is not null
+                    ? ActivatorUtilities.CreateInstance(sp, actionType)
+                    : Activator.CreateInstance(actionType);
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
+                    $"Action type {actionType.Name} construction failed: {ex.Message}. " +
+                    "When Atlas is used without the DI extension, the action must have a public parameterless constructor. " +
+                    "When using DI, ensure all constructor dependencies are registered as singleton or transient (scoped services are not supported)."));
+            }
+
+            nextEntry:;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to extract all <see cref="ServiceDescriptor"/>s from the given
+    /// <see cref="IServiceProvider"/> via reflection so that scoped-lifetime registrations can
+    /// be detected during <c>AssertConfigurationIsValid</c>.
+    /// Returns <c>null</c> if the provider's descriptor list cannot be accessed (e.g. custom
+    /// or wrapped providers), in which case scope detection is skipped gracefully.
+    /// </summary>
+    private static ServiceDescriptor[]? TryGetServiceDescriptors(IServiceProvider sp)
+    {
+        // The concrete Microsoft.Extensions.DependencyInjection.ServiceProvider exposes its
+        // registered descriptors via an internal CallSiteFactory property.
+        const string expectedTypeName = "Microsoft.Extensions.DependencyInjection.ServiceProvider";
+        if (sp.GetType().FullName != expectedTypeName) return null;
+
+        try
+        {
+            var factoryProp = sp.GetType().GetProperty(
+                "CallSiteFactory", BindingFlags.NonPublic | BindingFlags.Instance);
+            var factory = factoryProp?.GetValue(sp);
+            if (factory is null) return null;
+
+            var descField = factory.GetType().GetField(
+                "_descriptors", BindingFlags.NonPublic | BindingFlags.Instance);
+            return descField?.GetValue(factory) as ServiceDescriptor[];
+        }
+        catch
+        {
+            // Reflection failed (e.g. .NET internals changed) — skip scope detection.
+            return null;
         }
     }
 

@@ -91,7 +91,7 @@ public sealed class MapperConfiguration
     /// every problem found, or returns silently. Algorithm: see design §8.
     /// </summary>
     public void AssertConfigurationIsValid() =>
-        ConfigurationValidator.Validate(_registry, _enumValidationEnabled);
+        ConfigurationValidator.Validate(_registry, _enumValidationEnabled, _serviceProvider);
 
     /// <summary>Create a fresh <see cref="IMapper"/> bound to this configuration.</summary>
     public IMapper CreateMapper() => new Mapper(this, _registry);
