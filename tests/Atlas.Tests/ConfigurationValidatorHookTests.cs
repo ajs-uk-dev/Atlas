@@ -78,9 +78,14 @@ public class ConfigurationValidatorHookTests
     [Fact]
     public void ValidateHooks_ScopedServiceDependency_Errors_WithClearMessage()
     {
+        // Note: ValidateScopes = true makes ActivatorUtilities.CreateInstance throw
+        // when invoked against the root SP for a scoped dep. Without this, the construction
+        // would silently succeed at validate time and only fail at scope-creation later.
+        // Production use through `services.BuildServiceProvider(...)` defaults to false;
+        // users who want config-time scope detection enable it explicitly.
         var services = new ServiceCollection();
         services.AddScoped<ScopedDep>();
-        var sp = services.BuildServiceProvider();
+        var sp = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
 
         var cfg = new MapperConfiguration(c =>
             c.CreateMap<S, D>(MemberList.None)
@@ -89,7 +94,7 @@ public class ConfigurationValidatorHookTests
 
         var ex = Assert.Throws<AtlasConfigurationException>(() => cfg.AssertConfigurationIsValid());
         Assert.Contains("ActionWithScopedDep", ex.Message);
-        // Message should mention the construction failed and recommend singleton/transient.
+        // The wrapped message contains "scoped" via the helpful "scoped services are not supported" guidance.
         Assert.Contains("scoped", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }
