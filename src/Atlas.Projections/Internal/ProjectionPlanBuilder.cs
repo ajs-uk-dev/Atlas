@@ -54,6 +54,7 @@ internal static class ProjectionPlanBuilder
         {
             if (pm.Ignored) continue;
             if (pm.DestinationProperty is null) continue;
+            if (!ProjectionCompatibility.IsBindingProjectable(pm, out _)) continue;
             var binding = BuildBinding(srcExpr, pm, depth, pm.DestinationProperty.PropertyType, registry, maxDepth);
             if (binding is null) continue;
             bindings.Add(Expression.Bind(pm.DestinationProperty, binding));

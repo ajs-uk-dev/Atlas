@@ -128,7 +128,7 @@ public class MapperReverseMapTests
         Assert.Contains("Id", ex.Message);
         Assert.Contains("Subtotal", ex.Message);
         Assert.Contains("Tax", ex.Message);
-        Assert.DoesNotContain("Customer ", ex.Message);   // trailing space disambiguates from "Customer.Name" etc.
+        Assert.DoesNotContain("Customer:", ex.Message);   // colon suffix — would have caught the validator bug
     }
 
     [Fact]

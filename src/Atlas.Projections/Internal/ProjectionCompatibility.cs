@@ -23,6 +23,12 @@ internal static class ProjectionCompatibility
 
     public static bool IsBindingProjectable(PropertyMap pm, out string? reason)
     {
+        if (pm.DestinationPath is { Count: > 1 })
+        {
+            reason = "DestinationPath bindings (ForPath) cannot be projected — IQueryable providers don't support member-init writes into nested chains. Use forward-direction Map() instead.";
+            return false;
+        }
+
         // v1 has no per-property delegate construct; if any are added, gate them here.
         reason = null;
         return true;

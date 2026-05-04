@@ -72,6 +72,7 @@ internal static class ConfigurationValidator
 
             if (!pm.IsResolved)
             {
+                if (coveredTopIntermediates.Contains(prop.Name)) continue;
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, prop.Name,
                     "Destination member is unmapped (no source path, constant, or Ignore)."));

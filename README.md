@@ -173,6 +173,8 @@ on either direction to override or configure nested chains explicitly:
 - Each intermediate property must have a public setter.
 - Declaring both `CreateMap<D, S>()` and `CreateMap<S, D>().ReverseMap()` for the same pair throws — pick one.
 
+> **Note:** an explicit `.ForMember(d => d.X, ...)` on the reverse map suppresses mirroring of any `X.*` flattened bindings — the user is treated as writing X wholesale. Use `.ForPath(d => d.X.Y, ...)` instead if you want to override one leaf while keeping the other mirrored bindings active.
+
 ## What's in v1
 
 | Feature | Notes |
