@@ -37,16 +37,21 @@ internal static class ProjectionPlanBuilder
         {
             var args = ctor.GetParameters().Select(p =>
             {
+                Expression sourceExpr;
                 var pm = ctorParamMaps.FirstOrDefault(m =>
                     string.Equals(m.Name, p.Name, StringComparison.OrdinalIgnoreCase));
                 if (pm is null)
                 {
-                    return p.HasDefaultValue
-                        ? (Expression)Expression.Constant(p.DefaultValue, p.ParameterType)
+                    sourceExpr = p.HasDefaultValue
+                        ? Expression.Constant(p.DefaultValue, p.ParameterType)
                         : Expression.Default(p.ParameterType);
                 }
-                return BuildBinding(srcExpr, pm, depth, p.ParameterType, registry, maxDepth)
-                    ?? Expression.Default(p.ParameterType);
+                else
+                {
+                    sourceExpr = BuildBinding(srcExpr, pm, depth, p.ParameterType, registry, maxDepth)
+                        ?? Expression.Default(p.ParameterType);
+                }
+                return WrapProjectionWithTransformers(sourceExpr, p.ParameterType, tm);
             }).ToArray();
             newExpr = Expression.New(ctor, args);
         }
@@ -59,6 +64,9 @@ internal static class ProjectionPlanBuilder
             if (!ProjectionCompatibility.IsBindingProjectable(pm, out _)) continue;
             var binding = BuildBinding(srcExpr, pm, depth, pm.DestinationProperty.PropertyType, registry, maxDepth);
             if (binding is null) continue;
+
+            binding = WrapProjectionWithTransformers(binding, pm.DestinationProperty.PropertyType, tm);
+
             bindings.Add(Expression.Bind(pm.DestinationProperty, binding));
         }
 
@@ -204,6 +212,24 @@ internal static class ProjectionPlanBuilder
             {
                 current = stepProp;
             }
+        }
+        return current;
+    }
+
+    private static Expression WrapProjectionWithTransformers(
+        Expression sourceExpr,
+        Type destType,
+        TypeMap typeMap)
+    {
+        if (!typeMap.EffectiveTransformers.TryGetValue(destType, out var transformers))
+            return sourceExpr;
+
+        Expression current = sourceExpr;
+        foreach (var transformer in transformers)
+        {
+            // CRITICAL: inline via parameter substitution (NOT Expression.Invoke).
+            // The existing ParameterReplacer.Replace helper does this already.
+            current = ParameterReplacer.Replace(transformer.Body, transformer.Parameters[0], current);
         }
         return current;
     }
