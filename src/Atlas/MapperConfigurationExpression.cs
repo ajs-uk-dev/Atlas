@@ -30,9 +30,33 @@ public sealed class MapperConfigurationExpression
         MemberList memberList = MemberList.Destination)
     {
         EnsureMutable();
-        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList);
-        _typeMaps[map.Pair] = map; // last call wins
-        return new MappingExpression<TSource, TDestination>(map);
+        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
+        {
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+        };
+        RegisterTypeMap(map);
+        return new MappingExpression<TSource, TDestination>(map, RegisterTypeMap);
+    }
+
+    private void RegisterTypeMap(TypeMap newTm)
+    {
+        if (_typeMaps.TryGetValue(newTm.Pair, out var existing))
+        {
+            var existingIsReverse = existing.ReverseMapPair is not null;
+            var newIsReverse = newTm.ReverseMapPair is not null;
+            if (existingIsReverse || newIsReverse)
+            {
+                throw new AtlasConfigurationException(new List<ConfigurationError>
+                {
+                    new(newTm.SourceType, newTm.DestinationType, "(register)",
+                        $"Type pair ({newTm.SourceType.Name}, {newTm.DestinationType.Name}) is registered twice: " +
+                        $"{existing.RegistrationOrigin} and {newTm.RegistrationOrigin}. " +
+                        $"Pick one — either remove the duplicate, or rely solely on .ReverseMap() to produce the inverse.")
+                });
+            }
+            // Otherwise: preserve v1 last-write-wins behavior (silent overwrite).
+        }
+        _typeMaps[newTm.Pair] = newTm;
     }
 
     private void EnsureMutable()
@@ -55,7 +79,7 @@ public sealed class MapperConfigurationExpression
         EnsureMutable();
         foreach (var map in profile.GetTypeMaps())
         {
-            _typeMaps[map.Pair] = map;
+            RegisterTypeMap(map);
         }
     }
 
@@ -68,7 +92,7 @@ public sealed class MapperConfigurationExpression
         {
             foreach (var map in profile.GetTypeMaps())
             {
-                _typeMaps[map.Pair] = map;
+                RegisterTypeMap(map);
             }
         }
     }

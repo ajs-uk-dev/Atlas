@@ -14,9 +14,12 @@ public abstract class MapperProfile
     protected IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>(
         MemberList memberList = MemberList.Destination)
     {
-        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList);
+        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
+        {
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+        };
         _typeMaps.Add(map);
-        return new MappingExpression<TSource, TDestination>(map);
+        return new MappingExpression<TSource, TDestination>(map, _typeMaps.Add);
     }
 
     /// <summary>Used by <see cref="MapperConfigurationExpression"/> to harvest the registered maps.</summary>

@@ -134,6 +134,47 @@ cfg.CreateMap<LegacyStatus, OrderStatusV2>()
 
 See `docs/Atlas-Design-EnumSurface.md` for the full design.
 
+## Reverse mapping
+
+Declare both directions with one call. Forward conventions and source-side flattening
+auto-invert; the reverse map defaults to `MemberList.None`:
+
+```csharp
+public class OrderProfile : MapperProfile
+{
+    public OrderProfile()
+    {
+        CreateMap<Order, OrderDto>()
+            .ForMember(d => d.OrderTotal, opt => opt.MapFrom(s => s.Subtotal + s.Tax))
+            .ReverseMap();   // returns IMappingExpression<OrderDto, Order>
+    }
+}
+```
+
+Forward `Customer.Name → CustomerName` flattening becomes reverse `CustomerName → Customer.Name`
+unflattening — intermediates are auto-instantiated via parameterless constructors. Use `ForPath`
+on either direction to override or configure nested chains explicitly:
+
+```csharp
+.ReverseMap()
+.ForPath(d => d.Pricing.Total, opt => opt.MapFrom(s => s.OrderTotal))
+```
+
+**What does NOT auto-invert** (reconfigure on the returned reverse expression if needed):
+- `ForMember(MapFrom(expression))` — the forward expression is not inverted.
+- `Ignore()` — does not propagate to the reverse direction.
+- `ConvertUsing` — custom converters generally are not invertible.
+- `Include`/`IncludeBase` — inheritance chains are not reversed.
+- Enum per-value overrides — the reverse pair gets default ByValue strategy with no overrides.
+- Constructor parameter mappings (`ForCtorParam`).
+
+**Foot-gun guards** (caught by `AssertConfigurationIsValid`):
+- Each intermediate type in a `ForPath` or mirrored unflatten path must have a public parameterless constructor.
+- Each intermediate property must have a public setter.
+- Declaring both `CreateMap<D, S>()` and `CreateMap<S, D>().ReverseMap()` for the same pair throws — pick one.
+
+> **Note:** an explicit `.ForMember(d => d.X, ...)` on the reverse map suppresses mirroring of any `X.*` flattened bindings — the user is treated as writing X wholesale. Use `.ForPath(d => d.X.Y, ...)` instead if you want to override one leaf while keeping the other mirrored bindings active.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -157,7 +198,6 @@ See `docs/Atlas-Design-EnumSurface.md` for the full design.
 
 Each of these has its own design doc to be written separately:
 
-- Reverse mapping / unflattening
 - Before/after hooks, value transformers
 - Conditional mapping (`Condition`, `PreCondition`)
 - Null substitution
@@ -190,9 +230,9 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 93.1% | 81.3% | Met. Enum surface adds the `EnumResolver`, `EnumConversions`, and `ValidateEnum` paths. |
-| `Atlas.Extensions.DependencyInjection` | 92.8% | 80% | Met. |
-| `Atlas.Projections` | 93.91% | 83.57% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
+| `Atlas` | 94.3% | 82.7% | Met. Reverse mapping adds `ReverseMapMirror`, unflatten `ForPath` paths, and conflict-guard coverage. |
+| `Atlas.Extensions.DependencyInjection` | 92.9% | 100% | Met. |
+| `Atlas.Projections` | 93.9% | 83.6% | Met. Branch coverage benefits from the consolidated numeric-conversion helper. |
 
 ## License
 

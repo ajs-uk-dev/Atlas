@@ -41,6 +41,8 @@ public sealed class MapperConfiguration
         foreach (var tm in typeMaps)
             ConventionEngine.ResolveMissingMembers(tm, _conventionOptions, HasRegisteredMap);
 
+        ReverseMapMirror.Mirror(typeMaps);
+
         foreach (var tm in typeMaps)
             tm.Seal();
 

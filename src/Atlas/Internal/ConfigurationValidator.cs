@@ -17,6 +17,9 @@ internal static class ConfigurationValidator
             // Enum rules (always-on; covers per-value overrides, fallback, foot-gun guard).
             ValidateEnum(tm, errors);
 
+            // Path rules (always-on; covers ForPath / mirrored unflatten paths).
+            ValidatePaths(tm, errors);
+
             // Strict-mode enum source-side coverage (Task 9).
             if (enumValidationEnabled)
                 ValidateEnumStrict(tm, errors);
@@ -40,6 +43,16 @@ internal static class ConfigurationValidator
 
     private static void ValidateDestination(TypeMap tm, MapperRegistry registry, List<ConfigurationError> errors)
     {
+        // A DestinationPath binding counts as covering its TOP intermediate (path[0])
+        // for MemberList.Destination purposes — the user's intent with ForPath(d => d.Customer.Name)
+        // is "I'm writing into Customer." Without this rule, every multi-level unflatten
+        // would also produce a spurious "Customer unmapped" error.
+        var coveredTopIntermediates = new HashSet<string>(
+            tm.PropertyMaps
+                .Where(p => p.DestinationPath is { Count: > 1 })
+                .Select(p => p.DestinationPath![0].Name),
+            StringComparer.Ordinal);
+
         foreach (var prop in GetWritableProperties(tm.DestinationType))
         {
             var pm = tm.PropertyMaps.FirstOrDefault(p =>
@@ -47,6 +60,10 @@ internal static class ConfigurationValidator
 
             if (pm is null)
             {
+                // Skip the spurious "unmapped" complaint when this top property is implicitly
+                // covered by a multi-level DestinationPath binding (e.g., ForPath(d => d.Customer.Name)
+                // covers Customer at the top level).
+                if (coveredTopIntermediates.Contains(prop.Name)) continue;
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, prop.Name,
                     "No mapping configured for destination member."));
@@ -55,6 +72,7 @@ internal static class ConfigurationValidator
 
             if (!pm.IsResolved)
             {
+                if (coveredTopIntermediates.Contains(prop.Name)) continue;
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, prop.Name,
                     "Destination member is unmapped (no source path, constant, or Ignore)."));
@@ -185,6 +203,47 @@ internal static class ConfigurationValidator
             errors.Add(new ConfigurationError(
                 tm.SourceType, tm.DestinationType, "(strict)",
                 $"Strict enum validation: source values [{list}] have no mapping. Declare MapValue / Ignore for each, or WithFallback for a catch-all."));
+        }
+    }
+
+    private static void ValidatePaths(TypeMap tm, List<ConfigurationError> errors)
+    {
+        foreach (var pm in tm.PropertyMaps)
+        {
+            if (pm.DestinationPath is null || pm.DestinationPath.Count < 2) continue;
+            var path = pm.DestinationPath;
+
+            // Walk all intermediates (path[0..^2]):
+            //  - Each intermediate property must have a setter (we will assign path[i] = path[i] ?? new T()).
+            //  - Each intermediate's PropertyType must have a public parameterless ctor (Expression.New(ctor)).
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                var intermediate = path[i];
+                if (intermediate.SetMethod is not { IsPublic: true })
+                {
+                    errors.Add(new ConfigurationError(
+                        tm.SourceType, tm.DestinationType, pm.Name,
+                        $"Cannot unflatten through {intermediate.DeclaringType?.Name}.{intermediate.Name}: property has no public setter."));
+                    continue;
+                }
+
+                var ctor = intermediate.PropertyType.GetConstructor(Type.EmptyTypes);
+                if (ctor is null)
+                {
+                    errors.Add(new ConfigurationError(
+                        tm.SourceType, tm.DestinationType, pm.Name,
+                        $"Cannot unflatten path {pm.Name}: intermediate type {intermediate.PropertyType.Name} has no public parameterless constructor."));
+                }
+            }
+
+            // Leaf must have a setter (mirrors existing ForMember invariant).
+            var leaf = path[^1];
+            if (leaf.SetMethod is not { IsPublic: true })
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, pm.Name,
+                    $"Cannot write to leaf {leaf.DeclaringType?.Name}.{leaf.Name}: property has no public setter."));
+            }
         }
     }
 

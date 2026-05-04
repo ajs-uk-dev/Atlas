@@ -35,6 +35,34 @@ internal sealed class TypeMap
     /// </summary>
     public EnumMapConfig? EnumConfig { get; set; }
 
+    /// <summary>
+    /// When this map was created via <c>.ReverseMap()</c> on another map, points back to
+    /// that forward pair. Used by ReverseMapMirror to know which forward to
+    /// read from, AND by the conflict guard in <c>MapperConfigurationExpression</c> to
+    /// detect duplicate registrations. Null for maps registered directly via
+    /// <see cref="MapperProfile.CreateMap{TSource,TDestination}"/>.
+    /// </summary>
+    public TypePair? ReverseMapPair { get; set; }
+
+    /// <summary>
+    /// Cached reverse <c>MappingExpression</c> instance for idempotent <c>.ReverseMap()</c>
+    /// calls. Boxed as <c>object?</c> because the generic args differ from the forward map's.
+    /// Set by the first <c>.ReverseMap()</c> call on the corresponding forward
+    /// <c>MappingExpression</c>; null on the reverse TypeMap and on TypeMaps that were
+    /// never reversed.
+    /// </summary>
+    public object? CachedReverseExpression { get; set; }
+
+    /// <summary>
+    /// Human-readable origin string for diagnostic messages
+    /// (<c>"CreateMap&lt;Order, OrderDto&gt;()"</c> or
+    /// <c>"CreateMap&lt;Order, OrderDto&gt;().ReverseMap()"</c>). Set at construction in
+    /// <see cref="MapperProfile.CreateMap"/>, <c>MapperConfigurationExpression.CreateMap</c>,
+    /// and <c>MappingExpression.ReverseMap</c>. Empty string for TypeMaps constructed in
+    /// tests that don't care about the origin.
+    /// </summary>
+    public string RegistrationOrigin { get; set; } = string.Empty;
+
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
 

@@ -1,4 +1,6 @@
+using Atlas;
 using Atlas.Internal;
+using Atlas.Projections;
 using Atlas.Projections.Internal;
 
 namespace Atlas.Projections.Tests.Internal;
@@ -60,5 +62,65 @@ public class ProjectionCompatibilityTests
         Assert.True(ProjectionCompatibility.IsBindingProjectable(pm, out _));
     }
 
+    [Fact]
+    public void IsBindingProjectable_DestinationPathBinding_ReturnsFalseWithReason()
+    {
+        // ForPath(d => d.Inner.Value) produces a PM with DestinationPath.Count > 1.
+        // Projection cannot emit member-init writes into nested chains — must be rejected.
+        var path = new System.Reflection.PropertyInfo[]
+        {
+            typeof(ProjNestedDst).GetProperty(nameof(ProjNestedDst.Inner))!,
+            typeof(InnerHolder).GetProperty(nameof(InnerHolder.Value))!,
+        };
+        var pm = PropertyMap.ForPath(path);
+        Assert.False(ProjectionCompatibility.IsBindingProjectable(pm, out var reason));
+        Assert.NotNull(reason);
+        Assert.Contains("DestinationPath", reason);
+        Assert.Contains("ForPath", reason);
+    }
+
+    [Fact]
+    public void ProjectTo_ForwardMapWithForPath_IsRejectedWithDiagnostic()
+    {
+        // A forward map that uses ForPath(d => d.Inner.Value, ...) should be rejected by ProjectTo.
+        var config = new MapperConfiguration(c =>
+            c.CreateMap<ProjFlatSrc, ProjNestedDst>()
+                .ForPath(d => d.Inner!.Value, opt => opt.MapFrom(s => s.Name)));
+
+        var src = new[] { new ProjFlatSrc { Name = "test" } };
+        var ex = Assert.Throws<AtlasProjectionException>(
+            () => src.AsQueryable().ProjectTo<ProjNestedDst>(config));
+
+        Assert.Contains(ex.Diagnostics, d =>
+            d.Member == "Inner.Value" &&
+            d.Reason != null &&
+            d.Reason.Contains("DestinationPath"));
+    }
+
+    [Fact]
+    public void ProjectTo_ReverseMapWithMirroredUnflattenPaths_IsRejectedWithDiagnostic()
+    {
+        // Forward: ProjNestedSrc.Inner.Value -> ProjFlatDst.InnerValue (convention flattening,
+        // multi-level SourcePath). ReverseMap() mirrors this: the reverse PM for InnerValue
+        // becomes DestinationPath=[Inner, Value] on the reverse map ProjFlatDst -> ProjNestedSrc.
+        // ProjectTo on that reverse direction must reject the mirrored DestinationPath binding.
+        var config = new MapperConfiguration(c =>
+            c.CreateMap<ProjNestedSrc, ProjFlatDst>().ReverseMap());
+
+        var reverseSrc = new[] { new ProjFlatDst { InnerValue = "test" } };
+        var ex = Assert.Throws<AtlasProjectionException>(
+            () => reverseSrc.AsQueryable().ProjectTo<ProjNestedSrc>(config));
+
+        Assert.Contains(ex.Diagnostics, d =>
+            d.Reason != null &&
+            d.Reason.Contains("DestinationPath"));
+    }
+
     private class Holder { public string Name { get; set; } = ""; }
+    private class InnerHolder { public string Value { get; set; } = ""; }
+    private class ProjFlatSrc { public string Name { get; set; } = ""; }
+    private class ProjNestedDst { public InnerHolder? Inner { get; set; } }
+    private class ProjInnerSrc { public string Value { get; set; } = ""; }
+    private class ProjNestedSrc { public ProjInnerSrc? Inner { get; set; } }
+    private class ProjFlatDst { public string InnerValue { get; set; } = ""; }
 }
