@@ -13,6 +13,20 @@ public sealed class MapperConfiguration
     private readonly bool _enumValidationEnabled;
     private readonly StringToEnumCache _stringToEnumCache = new();
     internal StringToEnumCache Internal_StringToEnumCache => _stringToEnumCache;
+    private readonly IServiceProvider? _serviceProvider;
+
+    public MapperConfiguration(Action<MapperConfigurationExpression> configure, IServiceProvider serviceProvider)
+        : this(BuildExpression(configure), serviceProvider)
+    {
+    }
+
+    public MapperConfiguration(MapperConfigurationExpression expression, IServiceProvider serviceProvider)
+        : this(expression)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        _serviceProvider = serviceProvider;
+        _registry = new MapperRegistry(_registry.AllTypeMaps.ToList(), _stringToEnumCache, serviceProvider);
+    }
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure)
         : this(BuildExpression(configure))
