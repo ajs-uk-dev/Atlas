@@ -107,6 +107,34 @@ public class MapperValueTransformerTests
         Assert.Equal("new", existing.Name);
     }
 
+    public sealed class TrimReverseProfile : MapperProfile
+    {
+        public TrimReverseProfile()
+        {
+            ValueTransformers.Add<string>(s => s == null ? null! : s.Trim());
+            CreateMap<S, D>(MemberList.None).ReverseMap();
+        }
+    }
+
+    [Fact]
+    public void Profile_TransformerAppliesToReverseMap()
+    {
+        // Regression: profile-scoped transformer must apply to BOTH the forward and the
+        // reverse map registered via .ReverseMap(). Previously, OriginatingProfile was not
+        // propagated to the reverse TypeMap, causing TransformerResolver to skip the
+        // profile-scope read for it.
+        var cfg = new MapperConfiguration(c => c.AddProfile<TrimReverseProfile>());
+        var mapper = cfg.CreateMapper();
+
+        // Forward direction: profile transformer applies.
+        var d = mapper.Map<D>(new S { Name = "  forward  " });
+        Assert.Equal("forward", d.Name);
+
+        // Reverse direction: profile transformer must ALSO apply (the bug fixed by this commit).
+        var s = mapper.Map<S>(new D { Name = "  reverse  " });
+        Assert.Equal("reverse", s.Name);
+    }
+
     public sealed class Outer { public Inner? Child { get; set; } public string? Top { get; set; } }
     public sealed class OuterDto { public InnerDto? Child { get; set; } public string? Top { get; set; } }
     public sealed class Inner { public string? Name { get; set; } }
