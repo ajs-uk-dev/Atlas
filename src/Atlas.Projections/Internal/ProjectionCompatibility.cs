@@ -17,6 +17,13 @@ internal static class ProjectionCompatibility
             reason = "ConvertUsing(...) — delegate-form converter is in-memory only.";
             return false;
         }
+
+        if (tm.BeforeHooks.Count > 0 || tm.AfterHooks.Count > 0)
+        {
+            reason = $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable.";
+            return false;
+        }
+
         reason = null;
         return true;
     }
