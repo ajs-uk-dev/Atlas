@@ -148,9 +148,16 @@ internal static class ExecutionPlanBuilder
             var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
-            statements.Add(Expression.Assign(
-                Expression.Property(destParam, pm.DestinationProperty),
-                sourceExpr));
+            if (pm.DestinationPath is { } path && path.Count > 1)
+            {
+                statements.Add(BuildNestedAssign(destParam, path, sourceExpr));
+            }
+            else
+            {
+                statements.Add(Expression.Assign(
+                    Expression.Property(destParam, pm.DestinationProperty),
+                    sourceExpr));
+            }
         }
 
         Expression body = statements.Count > 0
@@ -213,9 +220,16 @@ internal static class ExecutionPlanBuilder
             var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
-            statements.Add(Expression.Assign(
-                Expression.Property(destVar, pm.DestinationProperty),
-                sourceExpr));
+            if (pm.DestinationPath is { } path && path.Count > 1)
+            {
+                statements.Add(BuildNestedAssign(destVar, path, sourceExpr));
+            }
+            else
+            {
+                statements.Add(Expression.Assign(
+                    Expression.Property(destVar, pm.DestinationProperty),
+                    sourceExpr));
+            }
         }
 
         statements.Add(destVar);
@@ -446,6 +460,39 @@ internal static class ExecutionPlanBuilder
         var iface = t.GetInterfaces().FirstOrDefault(i =>
             i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
         return iface?.GetGenericArguments()[0];
+    }
+
+    private static Expression BuildNestedAssign(
+        Expression destRoot,                       // dst (parameter or local var)
+        IReadOnlyList<PropertyInfo> destPath,      // [Customer, Address, City]
+        Expression valueExpr)                      // src.CustomerCity (already built)
+    {
+        var statements = new List<Expression>();
+        Expression accessSoFar = destRoot;
+
+        // Walk all intermediates (destPath[0..^2]) emitting a coalesce-and-assign per step.
+        for (int i = 0; i < destPath.Count - 1; i++)
+        {
+            var intermediateProp = destPath[i];
+            accessSoFar = Expression.Property(accessSoFar, intermediateProp);
+
+            // emit: accessSoFar = accessSoFar ?? new IntermediateType();
+            // Validator should have verified parameterless ctor exists; emit a clear runtime
+            // error here as a safety net for users who skip AssertConfigurationIsValid.
+            var ctor = intermediateProp.PropertyType.GetConstructor(Type.EmptyTypes)
+                ?? throw new InvalidOperationException(
+                    $"Cannot unflatten path through {intermediateProp.DeclaringType?.Name}.{intermediateProp.Name}: " +
+                    $"intermediate type {intermediateProp.PropertyType.FullName} has no public parameterless constructor. " +
+                    "Call AssertConfigurationIsValid() at startup to catch this at config time.");
+            var coalesce = Expression.Coalesce(accessSoFar, Expression.New(ctor));
+            statements.Add(Expression.Assign(accessSoFar, coalesce));
+        }
+
+        // Final step: leaf assign.
+        var leafAccess = Expression.Property(accessSoFar, destPath[^1]);
+        statements.Add(Expression.Assign(leafAccess, valueExpr));
+
+        return Expression.Block(statements);
     }
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
