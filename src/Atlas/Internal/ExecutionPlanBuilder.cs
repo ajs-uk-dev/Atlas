@@ -152,15 +152,17 @@ internal static class ExecutionPlanBuilder
             var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
+            var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
+
             if (pm.DestinationPath is { } path && path.Count > 1)
             {
-                statements.Add(BuildNestedAssign(destParam, path, sourceExpr));
+                statements.Add(BuildNestedAssign(destParam, path, transformed));
             }
             else
             {
                 statements.Add(Expression.Assign(
                     Expression.Property(destParam, pm.DestinationProperty),
-                    sourceExpr));
+                    transformed));
             }
         }
 
@@ -202,15 +204,21 @@ internal static class ExecutionPlanBuilder
         {
             var args = ctor.GetParameters().Select(p =>
             {
+                Expression sourceExpr;
                 var pm = ctorParamMaps.FirstOrDefault(m =>
                     string.Equals(m.Name, p.Name, StringComparison.OrdinalIgnoreCase));
                 if (pm is null)
                 {
-                    if (p.HasDefaultValue) return Expression.Constant(p.DefaultValue, p.ParameterType);
-                    return (Expression)Expression.Default(p.ParameterType);
+                    sourceExpr = p.HasDefaultValue
+                        ? Expression.Constant(p.DefaultValue, p.ParameterType)
+                        : Expression.Default(p.ParameterType);
                 }
-                return BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
-                    ?? Expression.Default(p.ParameterType);
+                else
+                {
+                    sourceExpr = BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
+                        ?? Expression.Default(p.ParameterType);
+                }
+                return WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
             }).ToArray();
             newDest = Expression.New(ctor, args);
         }
@@ -232,15 +240,17 @@ internal static class ExecutionPlanBuilder
             var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
+            var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
+
             if (pm.DestinationPath is { } path && path.Count > 1)
             {
-                statements.Add(BuildNestedAssign(destVar, path, sourceExpr));
+                statements.Add(BuildNestedAssign(destVar, path, transformed));
             }
             else
             {
                 statements.Add(Expression.Assign(
                     Expression.Property(destVar, pm.DestinationProperty),
-                    sourceExpr));
+                    transformed));
             }
         }
 
@@ -526,6 +536,27 @@ internal static class ExecutionPlanBuilder
 
         // Emit: typedDelegate.Invoke(src, dest)
         return Expression.Invoke(Expression.Constant(typedDelegate), srcExpr, destExpr);
+    }
+
+    private static Expression WrapWithTransformers(
+        Expression sourceExpr,
+        Type destType,
+        TypeMap typeMap)
+    {
+        if (!typeMap.EffectiveTransformers.TryGetValue(destType, out var transformers))
+            return sourceExpr;
+
+        Expression current = sourceExpr;
+        foreach (var transformer in transformers)
+        {
+            // CRITICAL: inline the transformer's body via parameter substitution.
+            // Do NOT use Expression.Invoke(transformer, current) — EF Core (and most LINQ
+            // providers) cannot translate Invoke nodes to SQL; they CAN translate the inlined
+            // body. The same pattern is used today by ProjectionPlanBuilder for MapFrom lambdas.
+            var paramSubst = new ParameterReplacer(transformer.Parameters[0], current);
+            current = paramSubst.Visit(transformer.Body)!;
+        }
+        return current;
     }
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
