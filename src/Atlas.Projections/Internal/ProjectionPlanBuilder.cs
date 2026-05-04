@@ -211,12 +211,10 @@ internal static class ProjectionPlanBuilder
     private static void RejectHooksOrThrow(TypeMap tm)
     {
         if (tm.BeforeHooks.Count == 0 && tm.AfterHooks.Count == 0) return;
-        throw new AtlasConfigurationException(new List<ConfigurationError>
+        throw new AtlasProjectionException(new List<ProjectionDiagnostic>
         {
             new(tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
-                $"Cannot project ({tm.SourceType.Name}, {tm.DestinationType.Name}): " +
-                $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s). " +
-                "Hooks are not translatable to IQueryable. Use mapper.Map<>() instead, or remove the hooks.")
+                $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable. Use mapper.Map<>() instead, or remove the hooks.")
         });
     }
 
