@@ -72,4 +72,20 @@ public class ExecutionPlanBuilderNestedAssignTests
         Assert.Equal("bob", dst.Child!.Name);
         Assert.Equal(42, dst.Child.Tally);
     }
+
+    [Fact]
+    public void NestedAssign_Update_PreservesExistingIntermediate()
+    {
+        var cfg = BuildConfig(expr => expr.ForPath(d => d.Child!.Name, opt => opt.MapFrom(s => s.Value)));
+        var mapper = cfg.CreateMapper();
+
+        var existingChild = new Inner { Name = "old", Tally = 99 };
+        var dst = new Outer { Child = existingChild };
+
+        mapper.Map<Src, Outer>(new Src { Value = "new" }, dst);
+
+        Assert.Same(existingChild, dst.Child);   // same instance preserved
+        Assert.Equal("new", dst.Child!.Name);    // leaf overwritten
+        Assert.Equal(99, dst.Child.Tally);       // sibling state intact
+    }
 }
