@@ -57,6 +57,8 @@ public sealed class MapperConfiguration
 
         ReverseMapMirror.Mirror(typeMaps);
 
+        TransformerResolver.Resolve(typeMaps, expression.ValueTransformers);
+
         foreach (var tm in typeMaps)
             tm.Seal();
 

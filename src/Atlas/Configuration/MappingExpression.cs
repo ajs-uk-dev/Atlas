@@ -150,6 +150,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         {
             ReverseMapPair = TypeMap.Pair,
             RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>().ReverseMap()",
+            OriginatingProfile = TypeMap.OriginatingProfile,
         };
         _sink(reverseTm);
 
@@ -231,6 +232,23 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
     {
         TypeMap.EnsureMutable();
         TypeMap.AfterHooks.Add(HookEntry.FromActionType(typeof(TAction)));
+        return this;
+    }
+
+    // ---- Value transformers ----
+
+    public IMappingExpression<TSource, TDestination> AddTransform<T>(Expression<Func<T, T>> transformer)
+    {
+        TypeMap.EnsureMutable();
+        ArgumentNullException.ThrowIfNull(transformer);
+
+        var key = typeof(T);
+        if (!TypeMap.TypeMapTransformers.TryGetValue(key, out var list))
+        {
+            list = new List<LambdaExpression>();
+            TypeMap.TypeMapTransformers[key] = list;
+        }
+        list.Add(transformer);
         return this;
     }
 

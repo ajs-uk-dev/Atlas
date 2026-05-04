@@ -229,6 +229,58 @@ to `Map<>()` instead.
 **Hooks do NOT auto-propagate via `.ReverseMap()`** — configure hooks on the reverse
 expression separately if needed.
 
+## Value transformers
+
+Apply post-processing functions to every value of a given destination type, registered at
+three scopes — **global** on `MapperConfigurationExpression`, **profile** on `MapperProfile`,
+and **type-map** on the fluent surface (`AddTransform<T>`). Composition is broad-first
+(`global → profile → type-map`); within each scope, transformers run in registration order.
+
+```csharp
+public sealed class TrimAndLowerProfile : MapperProfile
+{
+    public TrimAndLowerProfile()
+    {
+        // Profile-level: applies to every map in this profile.
+        ValueTransformers.Add<string>(s => s == null ? null! : s.Trim());
+
+        CreateMap<Order, OrderDto>()
+            .AddTransform<decimal>(d => Math.Round(d, 2));   // Type-map level
+    }
+}
+
+var cfg = new MapperConfiguration(c =>
+{
+    // Global: applies to every map in the entire configuration.
+    c.ValueTransformers.Add<string>(s => s == null ? null! : s.ToLowerInvariant());
+    c.AddProfile<TrimAndLowerProfile>();
+});
+```
+
+The API takes `Expression<Func<T, T>>` so the same registration works for both:
+
+- **In-memory** `mapper.Map<TDestination>(source)` — the expression is compiled to a delegate.
+- **`query.ProjectTo<TDestination>(cfg)`** — the expression is inlined into the LINQ
+  projection. EF Core (and other LINQ providers) translate translatable lambdas to SQL
+  natively (e.g., `s => s.Trim()` → `LTRIM(RTRIM(...))`).
+
+**Type matching is exact.** `Add<string>` matches `string` destinations only — not `object`,
+not other assignable types. `Add<int>` matches `int` only — register `Add<int?>` separately
+for nullable destinations.
+
+**Hooks vs transformers.** Hooks (`BeforeMap` / `AfterMap`) fire around the WHOLE map; value
+transformers fire on each property assignment of the matching type. The two compose
+independently.
+
+**ProjectTo limitations.** A transformer using constructs the LINQ provider can't translate
+(custom static method calls, captures of mutable state, etc.) will fail at query-execution
+time with the provider's standard "expression cannot be translated" error. Atlas does not
+pre-inspect lambdas.
+
+**Transformers do NOT auto-propagate** via `.ReverseMap()` or `Include`/`IncludeBase` — each
+direction or derived map declares its own type-map-level transformers, or relies on
+profile/global scope.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -283,9 +335,9 @@ reportgenerator -reports:tests/Atlas.Tests/TestResults/**/coverage.cobertura.xml
 
 | Project | Line | Branch (target) | Status |
 |---|---|---|---|
-| `Atlas` | 95.2% | 82.8% | Met. Before/after hooks add `HookResolver`, `HookEntry`, and `MappingInvoker` coverage. |
-| `Atlas.Extensions.DependencyInjection` | 90.0% | 100% | Met. |
-| `Atlas.Projections` | 96.9% | 83.6% | Met. Hooks-rejection path adds `ProjectionCompatibility` and `ProjectionValidator` branch coverage. |
+| `Atlas` | 94.6% | 83.5% | Met. |
+| `Atlas.Extensions.DependencyInjection` | 94.7% | 100% | Met. |
+| `Atlas.Projections` | 93.9% | 84.8% | Met. |
 
 ## License
 

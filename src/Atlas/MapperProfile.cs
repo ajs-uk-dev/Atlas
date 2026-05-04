@@ -16,7 +16,8 @@ public abstract class MapperProfile
     {
         var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
         {
-            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()",
+            OriginatingProfile = this,
         };
         _typeMaps.Add(map);
         return new MappingExpression<TSource, TDestination>(map, _typeMaps.Add);
@@ -28,4 +29,11 @@ public abstract class MapperProfile
     public NamingConvention? SourceMemberNamingConvention { get; protected set; }
     public NamingConvention? DestinationMemberNamingConvention { get; protected set; }
     public bool? CaseSensitive { get; protected set; }
+
+    /// <summary>
+    /// Profile-scoped value transformers — apply only to TypeMaps registered in this profile.
+    /// See <see cref="MapperConfigurationExpression.ValueTransformers"/> for global scope and
+    /// <c>IMappingExpression.AddTransform</c> for type-map scope.
+    /// </summary>
+    public ValueTransformerCollection ValueTransformers { get; } = new();
 }
