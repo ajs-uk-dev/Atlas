@@ -20,7 +20,7 @@ internal static class ProjectionCompatibility
 
         if (tm.BeforeHooks.Count > 0 || tm.AfterHooks.Count > 0)
         {
-            reason = $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable.";
+            reason = $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable. Use mapper.Map<>() instead, or remove the hooks.";
             return false;
         }
 

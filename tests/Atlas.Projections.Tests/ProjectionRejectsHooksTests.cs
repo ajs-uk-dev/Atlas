@@ -16,6 +16,7 @@ public class ProjectionRejectsHooksTests
         var ex = Assert.Throws<AtlasProjectionException>(() => srcs.ProjectTo<D>(cfg).ToList());
         Assert.Contains("BeforeMap", ex.Message);
         Assert.Contains("1", ex.Message);   // hook count
+        Assert.Contains("Map<>", ex.Message);
     }
 
     [Fact]
@@ -30,5 +31,6 @@ public class ProjectionRejectsHooksTests
         var ex = Assert.Throws<AtlasProjectionException>(() => srcs.ProjectTo<D>(cfg).ToList());
         Assert.Contains("AfterMap", ex.Message);
         Assert.Contains("2", ex.Message);   // hook count
+        Assert.Contains("Map<>", ex.Message);
     }
 }
