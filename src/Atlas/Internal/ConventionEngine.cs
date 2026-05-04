@@ -55,6 +55,18 @@ internal static class ConventionEngine
             typeMap.PropertyMaps.Select(p => p.Name),
             StringComparer.OrdinalIgnoreCase);
 
+        // Also add top intermediates of multi-level DestinationPath bindings to existingNames,
+        // so convention-based resolution skips them. A ForPath(d => d.Child!.Name) covers
+        // "Child" at the top level and should prevent a separate convention-resolution pm
+        // from being auto-created for it.
+        var coveredTopIntermediates = new HashSet<string>(
+            typeMap.PropertyMaps
+                .Where(p => p.DestinationPath is { Count: > 1 })
+                .Select(p => p.DestinationPath![0].Name),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var name in coveredTopIntermediates)
+            existingNames.Add(name);
+
         var parameterless = typeMap.DestinationType.GetConstructor(Type.EmptyTypes);
         var hasParameterless = parameterless is { IsPublic: true };
 

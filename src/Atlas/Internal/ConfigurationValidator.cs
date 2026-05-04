@@ -55,13 +55,15 @@ internal static class ConfigurationValidator
 
         foreach (var prop in GetWritableProperties(tm.DestinationType))
         {
-            if (coveredTopIntermediates.Contains(prop.Name)) continue;
-
             var pm = tm.PropertyMaps.FirstOrDefault(p =>
                 string.Equals(p.Name, prop.Name, StringComparison.Ordinal));
 
             if (pm is null)
             {
+                // Skip the spurious "unmapped" complaint when this top property is implicitly
+                // covered by a multi-level DestinationPath binding (e.g., ForPath(d => d.Customer.Name)
+                // covers Customer at the top level).
+                if (coveredTopIntermediates.Contains(prop.Name)) continue;
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, prop.Name,
                     "No mapping configured for destination member."));
@@ -225,7 +227,7 @@ internal static class ConfigurationValidator
                 }
 
                 var ctor = intermediate.PropertyType.GetConstructor(Type.EmptyTypes);
-                if (ctor is null || !ctor.IsPublic)
+                if (ctor is null)
                 {
                     errors.Add(new ConfigurationError(
                         tm.SourceType, tm.DestinationType, pm.Name,
