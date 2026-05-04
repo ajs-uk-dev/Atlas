@@ -44,6 +44,46 @@ public interface IMappingExpression<TSource, TDestination>
         Expression<Func<TDestination, TMember>> destinationPath,
         Action<IMemberConfigurationExpression<TSource, TDestination, TMember>> memberOptions);
 
+    /// <summary>
+    /// Registers the inverse (TDestination, TSource) map and returns its fluent surface.
+    /// Conventions and source-side flattening are auto-inverted (so that
+    /// CustomerName ↔ Customer.Name) via the <c>ReverseMapMirror</c> build phase.
+    /// </summary>
+    /// <remarks>
+    /// What IS auto-inverted on the reverse direction:
+    /// <list type="bullet">
+    ///   <item>Conventions (PascalCase name match, naming-style toggle).</item>
+    ///   <item>Source-side flattening: forward <c>SourcePath = [Customer, Name]</c> writing
+    ///         <c>dst.CustomerName</c> becomes a reverse binding writing <c>dst.Customer.Name</c>
+    ///         from <c>src.CustomerName</c>.</item>
+    /// </list>
+    ///
+    /// What IS NOT auto-inverted (reconfigure on the returned reverse expression if needed):
+    /// <list type="bullet">
+    ///   <item><c>ForMember(MapFrom(expression))</c> — the forward expression is not inverted.</item>
+    ///   <item><c>Ignore()</c> — does not propagate to the reverse direction.</item>
+    ///   <item><c>ConvertUsing</c> — custom converters generally are not invertible.</item>
+    ///   <item><c>Include</c>/<c>IncludeBase</c> — inheritance chains are not reversed.</item>
+    ///   <item>Enum per-value overrides — the reverse pair gets default ByValue strategy with no overrides.</item>
+    ///   <item>Constructor parameter mappings (<c>ForCtorParam</c>).</item>
+    /// </list>
+    ///
+    /// The reverse map defaults to <see cref="MemberList.None"/>. Pass a different
+    /// <paramref name="memberList"/> for stricter validation.
+    ///
+    /// Calling <c>ReverseMap()</c> twice on the same forward map returns the same reverse
+    /// expression instance (idempotent). The <paramref name="memberList"/> from the FIRST call
+    /// is locked; calling <c>ReverseMap(MemberList.X)</c> a second time with a different value
+    /// throws <see cref="AtlasConfigurationException"/>.
+    /// </remarks>
+    /// <exception cref="AtlasConfigurationException">
+    /// Thrown at configuration time if a TypeMap for <c>(TDestination, TSource)</c> is also
+    /// registered elsewhere via <see cref="MapperProfile.CreateMap"/> (or via another forward
+    /// map's <c>.ReverseMap()</c>); or if a second <c>.ReverseMap()</c> call passes a different
+    /// <paramref name="memberList"/> than the first.
+    /// </exception>
+    IMappingExpression<TDestination, TSource> ReverseMap(MemberList memberList = MemberList.None);
+
     /// <summary>Replace the entire mapping with a globally-registered converter.</summary>
     void ConvertUsing<TConverter>() where TConverter : ITypeConverter<TSource, TDestination>, new();
 

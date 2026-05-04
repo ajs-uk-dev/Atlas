@@ -30,9 +30,12 @@ public sealed class MapperConfigurationExpression
         MemberList memberList = MemberList.Destination)
     {
         EnsureMutable();
-        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList);
-        _typeMaps[map.Pair] = map; // last call wins
-        return new MappingExpression<TSource, TDestination>(map);
+        var map = new TypeMap(typeof(TSource), typeof(TDestination), memberList)
+        {
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>()"
+        };
+        _typeMaps[map.Pair] = map; // last call wins (Task 7 will route through RegisterTypeMap with the conflict guard)
+        return new MappingExpression<TSource, TDestination>(map, tm => _typeMaps[tm.Pair] = tm);
     }
 
     private void EnsureMutable()

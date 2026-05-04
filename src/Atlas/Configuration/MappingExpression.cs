@@ -11,10 +11,12 @@ namespace Atlas.Configuration;
 internal sealed class MappingExpression<TSource, TDestination> : IMappingExpression<TSource, TDestination>
 {
     public TypeMap TypeMap { get; }
+    private readonly Action<TypeMap>? _sink;
 
-    public MappingExpression(TypeMap typeMap)
+    public MappingExpression(TypeMap typeMap, Action<TypeMap>? sink = null)
     {
         TypeMap = typeMap;
+        _sink = sink;
     }
 
     public IMappingExpression<TSource, TDestination> ForMember<TMember>(
@@ -120,6 +122,40 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         if (!TypeMap.IncludedBases.Contains(pair))
             TypeMap.IncludedBases.Add(pair);
         return this;
+    }
+
+    public IMappingExpression<TDestination, TSource> ReverseMap(MemberList memberList = MemberList.None)
+    {
+        TypeMap.EnsureMutable();
+
+        if (TypeMap.CachedReverseExpression is MappingExpression<TDestination, TSource> existing)
+        {
+            var existingMemberList = existing.TypeMap.MemberList;
+            if (existingMemberList != memberList)
+                throw new AtlasConfigurationException(new List<ConfigurationError>
+                {
+                    new(typeof(TSource), typeof(TDestination), "(ReverseMap)",
+                        $"ReverseMap on ({typeof(TSource).Name}, {typeof(TDestination).Name}) was previously " +
+                        $"called with MemberList.{existingMemberList}; cannot now call with MemberList.{memberList}.")
+                });
+            return existing;
+        }
+
+        if (_sink is null)
+            throw new InvalidOperationException(
+                "ReverseMap can only be called on a MappingExpression created via MapperProfile.CreateMap " +
+                "or MapperConfigurationExpression.CreateMap (which provide a sink for the reverse TypeMap).");
+
+        var reverseTm = new TypeMap(typeof(TDestination), typeof(TSource), memberList)
+        {
+            ReverseMapPair = TypeMap.Pair,
+            RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>().ReverseMap()",
+        };
+        _sink(reverseTm);
+
+        var reverseExpr = new MappingExpression<TDestination, TSource>(reverseTm, _sink);
+        TypeMap.CachedReverseExpression = reverseExpr;
+        return reverseExpr;
     }
 
     // ---- Enum surface ----
