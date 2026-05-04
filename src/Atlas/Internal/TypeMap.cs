@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+
 namespace Atlas.Internal;
 
 /// <summary>
@@ -77,6 +79,32 @@ internal sealed class TypeMap
     /// <see cref="BeforeHooks"/>'s base-first order).
     /// </summary>
     public List<HookEntry> AfterHooks { get; } = new();
+
+    /// <summary>
+    /// Type-map-scoped value transformers (declared via <c>IMappingExpression.AddTransform</c>),
+    /// keyed by destination property type. Multiple transformers for the same type are stored
+    /// in registration (FIFO) order. Populated at fluent-call time; consumed by
+    /// <c>TransformerResolver</c> at config-build time.
+    /// </summary>
+    public Dictionary<Type, List<LambdaExpression>> TypeMapTransformers { get; } = new();
+
+    /// <summary>
+    /// Resolved (effective) transformers per destination type, computed by
+    /// <c>TransformerResolver</c> by composing global → profile → type-map. Within each scope,
+    /// FIFO order. The list is the application order: <c>Effective[T][0]</c> runs first on
+    /// the raw source value; <c>Effective[T][^1]</c> runs last and produces the final value
+    /// assigned to the destination property. Empty (no entry) means no transformers apply
+    /// for that type.
+    /// </summary>
+    public Dictionary<Type, IReadOnlyList<LambdaExpression>> EffectiveTransformers { get; } = new();
+
+    /// <summary>
+    /// Backref to the <see cref="MapperProfile"/> that registered this map (when registered
+    /// via <c>AddProfile</c>). Null for maps registered directly via
+    /// <see cref="MapperConfigurationExpression.CreateMap"/>. Used by
+    /// <c>TransformerResolver</c> to identify which profile-level transformers apply.
+    /// </summary>
+    public MapperProfile? OriginatingProfile { get; set; }
 
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
