@@ -54,6 +54,40 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         return this;
     }
 
+    public IMappingExpression<TSource, TDestination> ForPath<TMember>(
+        Expression<Func<TDestination, TMember>> destinationPath,
+        Action<IMemberConfigurationExpression<TSource, TDestination, TMember>> memberOptions)
+    {
+        TypeMap.EnsureMutable();
+        var path = ExtractPath(destinationPath);
+
+        // Single-level: behave exactly like ForMember (no DestinationPath set).
+        if (path.Count == 1)
+        {
+            TypeMap.PropertyMaps.RemoveAll(p => p.Name == path[0].Name);
+
+            var pmSingle = PropertyMap.ForProperty(path[0]);
+            var memberSingle = new MemberConfigurationExpression<TSource, TDestination, TMember>();
+            memberOptions(memberSingle);
+            memberSingle.ApplyTo(pmSingle);
+            pmSingle.IsExplicit = true;
+            TypeMap.PropertyMaps.Add(pmSingle);
+            return this;
+        }
+
+        // Multi-level: store full path; Name = "A.B.C".
+        var dottedName = string.Join('.', path.Select(p => p.Name));
+        TypeMap.PropertyMaps.RemoveAll(p => p.Name == dottedName);
+
+        var pm = PropertyMap.ForPath(path);
+        var member = new MemberConfigurationExpression<TSource, TDestination, TMember>();
+        memberOptions(member);
+        member.ApplyTo(pm);
+        pm.IsExplicit = true;
+        TypeMap.PropertyMaps.Add(pm);
+        return this;
+    }
+
     public void ConvertUsing<TConverter>() where TConverter : ITypeConverter<TSource, TDestination>, new()
     {
         TypeMap.EnsureMutable();
@@ -165,6 +199,37 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         throw new ArgumentException(
             "Destination selector must be a single property access expression (e.g., d => d.PropertyName).",
             nameof(selector));
+    }
+
+    private static IReadOnlyList<PropertyInfo> ExtractPath<TMember>(Expression<Func<TDestination, TMember>> selector)
+    {
+        var body = selector.Body;
+        if (body is UnaryExpression { NodeType: ExpressionType.Convert, Operand: var operand })
+            body = operand;
+
+        var stack = new Stack<PropertyInfo>();
+        var current = body;
+        while (current is MemberExpression me)
+        {
+            if (me.Member is not PropertyInfo prop)
+                throw new ArgumentException(
+                    "Destination selector must be a chain of property accesses (e.g., d => d.Outer.Inner.Property).",
+                    nameof(selector));
+            stack.Push(prop);
+            current = me.Expression!;
+        }
+
+        if (current is not ParameterExpression)
+            throw new ArgumentException(
+                "Destination selector must be a chain of property accesses (e.g., d => d.Outer.Inner.Property).",
+                nameof(selector));
+
+        if (stack.Count == 0)
+            throw new ArgumentException(
+                "Destination selector must reference at least one property.",
+                nameof(selector));
+
+        return stack.ToArray();
     }
 
     private static ParameterInfo FindCtorParam(string ctorParamName)

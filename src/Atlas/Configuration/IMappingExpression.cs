@@ -17,6 +17,33 @@ public interface IMappingExpression<TSource, TDestination>
         string ctorParamName,
         Action<IMemberConfigurationExpression<TSource, TDestination, object?>> paramOptions);
 
+    /// <summary>
+    /// Configures a binding for a nested destination path (e.g., <c>d => d.Customer.Name</c>).
+    /// At runtime, intermediates are auto-instantiated via their public parameterless
+    /// constructor (<c>dst.Customer ??= new Customer(); dst.Customer.Name = ...;</c>).
+    /// </summary>
+    /// <remarks>
+    /// Available on both forward and reverse maps with identical semantics. A single-level
+    /// path (<c>d => d.Foo</c>) is equivalent to <see cref="ForMember"/> — both methods
+    /// remove any prior binding for the same target and replace it (last-call-wins).
+    ///
+    /// Every intermediate type in the path must have a public parameterless constructor
+    /// AND every intermediate property must have a public setter; otherwise
+    /// <see cref="MapperConfiguration.AssertConfigurationIsValid"/> throws naming the
+    /// offending type and path.
+    ///
+    /// The leaf (last property in the chain) must be a writable property; this matches the
+    /// existing <c>ForMember</c> requirement.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown at configuration time if <paramref name="destinationPath"/> is not a chain
+    /// of property accesses — e.g., it contains method calls, indexers, arithmetic, or any
+    /// non-<see cref="System.Linq.Expressions.MemberExpression"/> node.
+    /// </exception>
+    IMappingExpression<TSource, TDestination> ForPath<TMember>(
+        Expression<Func<TDestination, TMember>> destinationPath,
+        Action<IMemberConfigurationExpression<TSource, TDestination, TMember>> memberOptions);
+
     /// <summary>Replace the entire mapping with a globally-registered converter.</summary>
     void ConvertUsing<TConverter>() where TConverter : ITypeConverter<TSource, TDestination>, new();
 
