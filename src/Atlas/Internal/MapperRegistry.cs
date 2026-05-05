@@ -1,16 +1,23 @@
+using System.Collections.Concurrent;
+
 namespace Atlas.Internal;
 
 /// <summary>
 /// Holds the type-map definitions and the cache of compiled mapping delegates.
-/// Built once during configuration; read-only afterward except for lazy delegate caching.
+/// Built once during configuration; read-only afterward except for lazy delegate caching
+/// and on-demand materialization of open-generic closed pairs.
 /// </summary>
 internal sealed class MapperRegistry
 {
-    private readonly Dictionary<TypePair, TypeMap> _typeMaps;
+    private readonly ConcurrentDictionary<TypePair, TypeMap> _typeMaps;
     private readonly Dictionary<TypePair, Delegate> _delegates = new();
     private readonly Dictionary<TypePair, Delegate> _updateDelegates = new();
     private readonly Dictionary<TypePair, int> _compileCounts = new();
     private readonly Lock _lock = new();
+
+    private readonly IReadOnlyList<OpenGenericTypeMap> _openGenericMaps;
+    private readonly ValueTransformerCollection _globalTransformers;
+    private readonly ConventionOptions _conventionOptions;
 
     public StringToEnumCache StringToEnumCache { get; }
 
@@ -32,17 +39,41 @@ internal sealed class MapperRegistry
     public MapperRegistry(
         IEnumerable<TypeMap> typeMaps,
         StringToEnumCache? stringToEnumCache = null,
-        IServiceProvider? serviceProvider = null)
+        IServiceProvider? serviceProvider = null,
+        IReadOnlyList<OpenGenericTypeMap>? openGenericMaps = null,
+        ValueTransformerCollection? globalTransformers = null,
+        ConventionOptions? conventionOptions = null)
     {
-        _typeMaps = typeMaps.ToDictionary(t => t.Pair);
+        _typeMaps = new ConcurrentDictionary<TypePair, TypeMap>(
+            typeMaps.ToDictionary(t => t.Pair));
         StringToEnumCache = stringToEnumCache ?? new StringToEnumCache();
         ServiceProvider = serviceProvider;
+        _openGenericMaps = openGenericMaps ?? Array.Empty<OpenGenericTypeMap>();
+        _globalTransformers = globalTransformers ?? new ValueTransformerCollection();
+        _conventionOptions = conventionOptions ?? new ConventionOptions(
+            NamingConvention.PascalCase, NamingConvention.PascalCase, CaseSensitive: true);
     }
 
-    public TypeMap? GetTypeMap(TypePair pair) =>
-        _typeMaps.TryGetValue(pair, out var m) ? m : null;
+    public TypeMap? GetTypeMap(TypePair pair)
+    {
+        // Hot path: exact closed-pair match. ConcurrentDictionary read is lock-free.
+        if (_typeMaps.TryGetValue(pair, out var m)) return m;
 
-    public IReadOnlyCollection<TypeMap> AllTypeMaps => _typeMaps.Values;
+        // Fast bail when no open-generic registrations exist — hot-path zero-cost
+        // for users who don't use the feature.
+        if (_openGenericMaps.Count == 0) return null;
+
+        // Closed-pair miss. Search open-generic registrations.
+        var template = FindMatchingOpenGenericTemplate(pair);
+        if (template is null) return null;
+
+        // Materialize the closed pair via GetOrAdd. Under contention, the factory may
+        // run more than once but only one TypeMap is stored — materialization is
+        // idempotent (deterministic given the same pair + template + convention options).
+        return _typeMaps.GetOrAdd(pair, p => MaterializeClosed(template, p));
+    }
+
+    public IReadOnlyCollection<TypeMap> AllTypeMaps => (IReadOnlyCollection<TypeMap>)_typeMaps.Values;
 
     public bool TryGetDelegate(TypePair pair, out Delegate? del)
     {
@@ -90,6 +121,39 @@ internal sealed class MapperRegistry
             _delegates[pair] = del;
             _compileCounts[pair] = (_compileCounts.TryGetValue(pair, out var c) ? c : 0) + 1;
         }
+    }
+
+    private OpenGenericTypeMap? FindMatchingOpenGenericTemplate(TypePair pair)
+    {
+        // Linear scan — open-generic registrations are typically a handful per app,
+        // not enough to warrant a hashed lookup.
+        foreach (var template in _openGenericMaps)
+        {
+            if (template.Matches(pair)) return template;
+        }
+        return null;
+    }
+
+    private TypeMap MaterializeClosed(OpenGenericTypeMap template, TypePair closedPair)
+    {
+        var tm = new TypeMap(closedPair.Source, closedPair.Destination, template.MemberList)
+        {
+            OriginatingProfile = template.OriginatingProfile,
+            RegistrationOrigin = $"{template.RegistrationOrigin} " +
+                                 $"(closed at runtime as ({closedPair.Source.Name}, {closedPair.Destination.Name}))"
+        };
+
+        // HasRegisteredMap probe — the convention engine uses this to decide whether to
+        // emit a nested-map invoke for non-primitive property types. Reads the live
+        // ConcurrentDictionary so previously-materialized closed pairs are visible.
+        bool HasRegisteredMap(Type s, Type d) => _typeMaps.ContainsKey(new TypePair(s, d));
+        ConventionEngine.ResolveMissingMembers(tm, _conventionOptions, HasRegisteredMap);
+
+        // Profile/global value transformers via the existing resolver.
+        TransformerResolver.Resolve(new[] { tm }, _globalTransformers);
+
+        tm.Seal();
+        return tm;
     }
 
     // ---- Update-in-place delegates ----
