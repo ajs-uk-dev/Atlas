@@ -17,7 +17,7 @@ public class ProjectTo_NullSubstituteTests
                 .ForMember(d => d.WordCount, opt =>
                 {
                     opt.MapFrom(s => s.WordCount);
-                    opt.NullSubstitute(-1L);
+                    opt.NullSubstitute(-1);
                 })
                 .ForMember(d => d.Body, opt => opt.MapFrom(s => s.Body))
                 .ForMember(d => d.Id, opt => opt.MapFrom(s => s.Id)));
@@ -39,7 +39,7 @@ public class ProjectTo_NullSubstituteTests
                 .ForMember(d => d.WordCount, opt =>
                 {
                     opt.MapFrom(s => s.WordCount);
-                    opt.NullSubstitute(-1L);
+                    opt.NullSubstitute(-1);
                 })
                 .ForMember(d => d.Body, opt => opt.MapFrom(s => s.Body))
                 .ForMember(d => d.Id, opt => opt.MapFrom(s => s.Id)));

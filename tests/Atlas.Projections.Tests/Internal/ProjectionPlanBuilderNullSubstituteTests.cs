@@ -11,6 +11,8 @@ public class ProjectionPlanBuilderNullSubstituteTests
 {
     public struct S { public string? Name { get; set; } public int? Score { get; set; } }
     public class D { public string Name { get; set; } = ""; public int Score { get; set; } }
+    public struct SLong { public int? Score { get; set; } }
+    public class DLong { public long? Score { get; set; } }
 
     private static MapperRegistry BuildRegistry(Action<MapperConfigurationExpression> configure)
     {
@@ -55,6 +57,31 @@ public class ProjectionPlanBuilderNullSubstituteTests
 
         // No Coalesce node should appear when no substitute is configured.
         Assert.Null(FindCoalesce(nameBinding.Expression));
+    }
+
+    [Fact]
+    public void Projection_NullableSource_To_NullableWiderDestination_GeneratesCorrectExpression()
+    {
+        // Regression: previously the lifted-nullable branch in ApplyProjectionNullSubstitute
+        // produced an int-typed Coalesce that ConvertOrInline couldn't widen to long?.
+        var registry = BuildRegistry(c =>
+            c.CreateMap<SLong, DLong>(MemberList.None)
+                .ForMember(d => d.Score, opt =>
+                {
+                    opt.MapFrom(s => s.Score);
+                    opt.NullSubstitute(0);
+                }));
+        var lambda = ProjectionPlanBuilder.Build(registry, new TypePair(typeof(SLong), typeof(DLong)), maxDepth: 5);
+
+        var memberInit = (MemberInitExpression)lambda.Body;
+        var scoreBinding = memberInit.Bindings.OfType<MemberAssignment>()
+            .Single(b => b.Member.Name == nameof(DLong.Score));
+
+        // Binding type must be long? (the destination type) — would have failed compilation
+        // before the fix because ConvertOrInline couldn't widen int (post-Coalesce) to long?.
+        Assert.Equal(typeof(long?), scoreBinding.Expression.Type);
+        // Binding must contain a Coalesce node.
+        Assert.NotNull(FindCoalesce(scoreBinding.Expression));
     }
 
     private static BinaryExpression? FindCoalesce(Expression node)

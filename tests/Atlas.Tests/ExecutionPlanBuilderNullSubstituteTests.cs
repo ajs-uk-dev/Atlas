@@ -17,6 +17,8 @@ public class ExecutionPlanBuilderNullSubstituteTests
         public long Score { get; set; }
         public string Nick { get; set; } = "";
     }
+    public class SNullable { public int? Score { get; set; } }
+    public class DNullable { public long? Score { get; set; } }
 
     [Fact]
     public void ReferenceTypeSourceNull_UsesSubstitute()
@@ -174,5 +176,27 @@ public class ExecutionPlanBuilderNullSubstituteTests
         Assert.Null(spaces.Name);
         // Real source → substitute bypassed → trim → "Alice" → length > 0 → assigns "Alice".
         Assert.Equal("Alice", real.Name);
+    }
+
+    [Fact]
+    public void NullableSource_To_NullableWiderDestination_LiftsAndWidens()
+    {
+        // Regression test: previously the lifted-nullable branch in ApplyNullSubstitute
+        // stripped the nullable type, breaking the asymmetric widening case (int → long?).
+        // Fix preserves the nullable result so downstream ConvertOrMap sees int? → long?.
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<SNullable, DNullable>(MemberList.None)
+                .ForMember(d => d.Score, opt =>
+                {
+                    opt.MapFrom(s => s.Score);
+                    opt.NullSubstitute(0);
+                }));
+        var mapper = cfg.CreateMapper();
+
+        var nullScore = mapper.Map<DNullable>(new SNullable { Score = null });
+        var realScore = mapper.Map<DNullable>(new SNullable { Score = 42 });
+
+        Assert.Equal(0L, nullScore.Score);
+        Assert.Equal(42L, realScore.Score);
     }
 }

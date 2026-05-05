@@ -143,6 +143,19 @@ internal static class ProjectionPlanBuilder
         if (NumericConversions.HasImplicitConversion(source.Type, targetType))
             return Expression.Convert(source, targetType);
 
+        // Handle asymmetric nullable cases that NumericConversions rejects at line 21
+        // (it requires BOTH sides to be nullable for the symmetric unwrap).
+        // Case A: Nullable<T> → U  — unwrap (and optionally widen) (e.g. int? → int, int? → long).
+        // Case B: T → Nullable<U>  — widen then wrap   (e.g. int → long?).
+        var srcUnderlying = Nullable.GetUnderlyingType(source.Type);
+        var dstUnderlying = Nullable.GetUnderlyingType(targetType);
+        if (srcUnderlying is not null && dstUnderlying is null
+            && (srcUnderlying == targetType || NumericConversions.HasImplicitConversion(srcUnderlying, targetType)))
+            return Expression.Convert(source, targetType);
+        if (srcUnderlying is null && dstUnderlying is not null
+            && (source.Type == dstUnderlying || NumericConversions.HasImplicitConversion(source.Type, dstUnderlying)))
+            return Expression.Convert(source, targetType);
+
         if (IsCollection(source.Type) && IsCollection(targetType))
             return BuildCollectionProjection(source, targetType, depth, registry, maxDepth);
 
@@ -277,8 +290,17 @@ internal static class ProjectionPlanBuilder
 
         if (substituteBody.Type != resolvedExpr.Type)
         {
+            // Common case: resolvedExpr is Nullable<T>, substituteBody is T.
+            // Expression.Coalesce(Nullable<T>, T) returns T (non-nullable). Re-wrap the result
+            // back to Nullable<T> so downstream ConvertOrInline sees a symmetric widening case
+            // (e.g., int? → long?) rather than asymmetric (int → long?), which
+            // NumericConversions rejects when one side is nullable and the other isn't.
             if (Nullable.GetUnderlyingType(resolvedExpr.Type) == substituteBody.Type)
-                return Expression.Coalesce(resolvedExpr, substituteBody);
+            {
+                return Expression.Convert(
+                    Expression.Coalesce(resolvedExpr, substituteBody),
+                    resolvedExpr.Type);
+            }
             substituteBody = Expression.Convert(substituteBody, resolvedExpr.Type);
         }
 
