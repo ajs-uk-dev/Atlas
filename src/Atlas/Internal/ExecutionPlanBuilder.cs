@@ -241,16 +241,18 @@ internal static class ExecutionPlanBuilder
             if (sourceExpr is null) continue;
 
             var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
+            var assignValue = WrapWithConditions(
+                transformed, pm, srcParam, pm.DestinationProperty.PropertyType);
 
             if (pm.DestinationPath is { } path && path.Count > 1)
             {
-                statements.Add(BuildNestedAssign(destVar, path, transformed));
+                statements.Add(BuildNestedAssign(destVar, path, assignValue));
             }
             else
             {
                 statements.Add(Expression.Assign(
                     Expression.Property(destVar, pm.DestinationProperty),
-                    transformed));
+                    assignValue));
             }
         }
 
@@ -538,6 +540,43 @@ internal static class ExecutionPlanBuilder
         return Expression.Invoke(Expression.Constant(typedDelegate), srcExpr, destExpr);
     }
 
+    private static Expression WrapWithConditions(
+        Expression resolvedExpr,
+        PropertyMap pm,
+        ParameterExpression srcParam,
+        Type valueType,
+        Expression? fallbackExpr = null)
+    {
+        if (pm.PreCondition is null && pm.Condition is null)
+            return resolvedExpr;
+
+        var fallback = fallbackExpr ?? Expression.Default(valueType);
+
+        // Inner: Condition gate (post-resolution).
+        Expression inner = resolvedExpr;
+        if (pm.Condition is not null)
+        {
+            // Hoist resolvedExpr into a local so it is evaluated once even if the
+            // condition body references it multiple times.
+            var resolvedVar = Expression.Variable(valueType, "r");
+            var condBody = SubstituteTwoParams(pm.Condition, srcParam, resolvedVar);
+            inner = Expression.Block(
+                variables: new[] { resolvedVar },
+                Expression.Assign(resolvedVar, resolvedExpr),
+                Expression.Condition(condBody, resolvedVar, fallback));
+        }
+
+        // Outer: PreCondition gate (pre-resolution). Wraps the entire Condition block,
+        // so resolvedExpr is not evaluated when PreCondition fails.
+        if (pm.PreCondition is not null)
+        {
+            var preBody = SubstituteOneParam(pm.PreCondition, srcParam);
+            inner = Expression.Condition(preBody, inner, fallback);
+        }
+
+        return inner;
+    }
+
     private static Expression WrapWithTransformers(
         Expression sourceExpr,
         Type destType,
@@ -557,6 +596,16 @@ internal static class ExecutionPlanBuilder
             current = paramSubst.Visit(transformer.Body)!;
         }
         return current;
+    }
+
+    private static Expression SubstituteOneParam(LambdaExpression lambda, Expression param0Replacement)
+        => new ParameterReplacer(lambda.Parameters[0], param0Replacement).Visit(lambda.Body)!;
+
+    private static Expression SubstituteTwoParams(LambdaExpression lambda,
+        Expression param0Replacement, Expression param1Replacement)
+    {
+        var afterFirst = new ParameterReplacer(lambda.Parameters[0], param0Replacement).Visit(lambda.Body)!;
+        return new ParameterReplacer(lambda.Parameters[1], param1Replacement).Visit(afterFirst)!;
     }
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
