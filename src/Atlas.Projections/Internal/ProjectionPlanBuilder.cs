@@ -51,7 +51,17 @@ internal static class ProjectionPlanBuilder
                     sourceExpr = BuildBinding(srcExpr, pm, depth, p.ParameterType, registry, maxDepth)
                         ?? Expression.Default(p.ParameterType);
                 }
-                return WrapProjectionWithTransformers(sourceExpr, p.ParameterType, tm);
+                var transformed = WrapProjectionWithTransformers(sourceExpr, p.ParameterType, tm);
+
+                if (pm is not null)
+                {
+                    var fallback = p.HasDefaultValue
+                        ? (Expression)Expression.Constant(p.DefaultValue, p.ParameterType)
+                        : Expression.Default(p.ParameterType);
+                    transformed = WrapProjectionWithConditions(
+                        transformed, pm, srcExpr, p.ParameterType, fallback);
+                }
+                return transformed;
             }).ToArray();
             newExpr = Expression.New(ctor, args);
         }
@@ -66,6 +76,8 @@ internal static class ProjectionPlanBuilder
             if (binding is null) continue;
 
             binding = WrapProjectionWithTransformers(binding, pm.DestinationProperty.PropertyType, tm);
+            binding = WrapProjectionWithConditions(
+                binding, pm, srcExpr, pm.DestinationProperty.PropertyType);
 
             bindings.Add(Expression.Bind(pm.DestinationProperty, binding));
         }
@@ -214,6 +226,39 @@ internal static class ProjectionPlanBuilder
             }
         }
         return current;
+    }
+
+    private static Expression WrapProjectionWithConditions(
+        Expression resolvedExpr,
+        PropertyMap pm,
+        Expression srcExpr,
+        Type valueType,
+        Expression? fallbackExpr = null)
+    {
+        if (pm.PreCondition is null && pm.Condition is null)
+            return resolvedExpr;
+
+        var fallback = fallbackExpr ?? Expression.Default(valueType);
+        Expression? testExpr = null;
+
+        if (pm.PreCondition is not null)
+        {
+            var preBody = ParameterReplacer.Replace(
+                pm.PreCondition.Body, pm.PreCondition.Parameters[0], srcExpr);
+            testExpr = preBody;
+        }
+
+        if (pm.Condition is not null)
+        {
+            // Substitute BOTH parameters: param 0 = srcExpr, param 1 = resolvedExpr (inlined twice).
+            var condBody = ParameterReplacer.Replace(
+                pm.Condition.Body, pm.Condition.Parameters[0], srcExpr);
+            condBody = ParameterReplacer.Replace(
+                condBody, pm.Condition.Parameters[1], resolvedExpr);
+            testExpr = testExpr is null ? condBody : Expression.AndAlso(testExpr, condBody);
+        }
+
+        return Expression.Condition(testExpr!, resolvedExpr, fallback);
     }
 
     private static Expression WrapProjectionWithTransformers(
