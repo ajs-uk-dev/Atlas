@@ -341,6 +341,44 @@ Translates to SQL `COALESCE` in `ProjectTo<>()`. Substitutes flow base→derived
 inheritance via the existing explicit-config precedence rule. Substitutes do NOT
 auto-flip across `.ReverseMap()`.
 
+## Open generics
+
+A single `CreateMap(typeof(Source<>), typeof(Destination<>))` registration applies to
+every closed instantiation at runtime. Atlas materializes a closed `TypeMap` per closed
+pair on first use via `MapperRegistry.GetTypeMap`'s lazy fallback, then caches it.
+
+```csharp
+public class Wrapper<T> { public T Value { get; set; } }
+public class WrapperDto<T> { public T Value { get; set; } }
+
+var cfg = new MapperConfiguration(c =>
+{
+    c.CreateMap(typeof(Wrapper<>), typeof(WrapperDto<>));
+});
+var mapper = cfg.CreateMapper();
+
+var intDto = mapper.Map<WrapperDto<int>>(new Wrapper<int> { Value = 42 });
+var stringDto = mapper.Map<WrapperDto<string>>(new Wrapper<string> { Value = "hi" });
+```
+
+**Closed-pair-takes-precedence rule:** when a user has registered both the open
+template AND a specific closed pair, the closed pair wins. This is the documented
+escape hatch for per-member overrides on a specific instantiation.
+
+**Convention-only:** open-generic registrations carry no fluent surface — no
+`ForMember`, no `Include`, no `BeforeMap`, no `NullSubstitute`, no `ReverseMap`.
+Users who need any of these register the specific closed pair via the generic
+`CreateMap<TSrc, TDst>()` overload.
+
+**Validation:** open-generic templates are excluded from `AssertConfigurationIsValid()`
+per the "not every closed combination is valid" rule. Materialized closed pairs that
+exist by validation time will be validated as a side effect of being in the closed-pair
+registry.
+
+**Translates to ProjectTo:** `query.ProjectTo<WrapperDto<int>>(cfg)` triggers
+materialization on first call and reuses the cached closed `TypeMap` for subsequent
+projections.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -364,7 +402,6 @@ auto-flip across `.ReverseMap()`.
 
 Each of these has its own design doc to be written separately:
 
-- Open generics
 - Dynamic / dictionary-shaped sources
 - Reference handling (cycle detection)
 - Attribute-based configuration
