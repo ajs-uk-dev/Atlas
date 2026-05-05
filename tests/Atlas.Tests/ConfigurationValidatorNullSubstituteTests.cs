@@ -9,6 +9,8 @@ public class ConfigurationValidatorNullSubstituteTests
     public class WithIntDto { public int Value { get; set; } }
     public class WithNullableInt { public int? Value { get; set; } }
     public class WithNullableIntDto { public int Value { get; set; } }
+    public class WithNullableLong { public long? Value { get; set; } }
+    public class WithNullableLongDto { public long Value { get; set; } }
     public class WithString { public string? Name { get; set; } }
     public class WithStringDto { public string Name { get; set; } = ""; }
     public class WithEnum { public DayOfWeek Day { get; set; } }
@@ -88,5 +90,22 @@ public class ConfigurationValidatorNullSubstituteTests
         var ex = Assert.Throws<AtlasConfigurationException>(() => cfg.AssertConfigurationIsValid());
         Assert.Contains("not assignable", ex.Message);
         Assert.Contains("String", ex.Message);
+        Assert.Contains("Int32?", ex.Message);   // verifies FormatSourceTypeName produces friendly name
+    }
+
+    [Fact]
+    public void Validator_NullSubstitute_NumericWidening_Passes()
+    {
+        // Substitute is `int` (literal 0); source is `long?`.
+        // Allowed via NumericConversions.HasImplicitConversion(int, long).
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<WithNullableLong, WithNullableLongDto>(MemberList.None)
+                .ForMember(d => d.Value, opt =>
+                {
+                    opt.MapFrom(s => s.Value);
+                    opt.NullSubstitute(0);
+                }));
+
+        cfg.AssertConfigurationIsValid();   // no throw
     }
 }

@@ -355,7 +355,7 @@ internal static class ConfigurationValidator
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, pm.Name,
                     $"NullSubstitute on member '{pm.Name}' is unreachable: source member type " +
-                    $"{sourceType.Name} is a non-nullable value type and cannot be null."));
+                    $"{FormatSourceTypeName(sourceType)} is a non-nullable value type and cannot be null."));
                 continue;
             }
 
@@ -370,7 +370,7 @@ internal static class ConfigurationValidator
                 errors.Add(new ConfigurationError(
                     tm.SourceType, tm.DestinationType, pm.Name,
                     $"NullSubstitute on member '{pm.Name}' has type {substituteType.Name} " +
-                    $"which is not assignable to source-member type {sourceType.Name}."));
+                    $"which is not assignable to source-member type {FormatSourceTypeName(sourceType)}."));
             }
         }
     }
@@ -380,5 +380,11 @@ internal static class ConfigurationValidator
         if (pm.CustomExpression is not null) return pm.CustomExpression.Body.Type;
         if (pm.SourcePath is { Members.Count: > 0 } sp) return sp.Members[^1].PropertyType;
         return null;
+    }
+
+    private static string FormatSourceTypeName(Type sourceType)
+    {
+        var underlying = Nullable.GetUnderlyingType(sourceType);
+        return underlying is not null ? $"{underlying.Name}?" : sourceType.Name;
     }
 }
