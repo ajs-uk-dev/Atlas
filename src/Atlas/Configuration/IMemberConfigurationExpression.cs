@@ -66,4 +66,65 @@ public interface IMemberConfigurationExpression<TSource, TDestination, TMember>
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown if <paramref name="predicate"/> is null.</exception>
     void Condition(Expression<Func<TSource, TMember, bool>> predicate);
+
+    /// <summary>
+    /// Supplies a fallback value used when the resolved source value is <c>null</c>.
+    /// The substitute is typed as the source member and runs through the same conversion
+    /// pipeline as a real source value would (numeric / enum auto-conversion, registered
+    /// TypeMaps).
+    /// </summary>
+    /// <typeparam name="TSourceMember">
+    /// The source-member type. Compiler-inferred from the literal in the constant overload
+    /// or the lambda body in the Expression overload.
+    /// </typeparam>
+    /// <param name="constant">The fallback value used when the resolved source is null.</param>
+    /// <remarks>
+    /// Only meaningful when the resolved source-member type is a reference type or
+    /// <see cref="Nullable{T}"/>. <see cref="MapperConfiguration.AssertConfigurationIsValid"/>
+    /// reports an error if <c>NullSubstitute</c> is configured on a non-nullable
+    /// value-typed source member (the substitute would be unreachable). It also reports
+    /// an error if the substitute's type is not assignable to the resolved source-member type.
+    /// <para>
+    /// Pipeline placement: <b>PreCondition → resolve → null-substitute → convert → transform →
+    /// Condition → assign</b>. Value transformers and <c>Condition</c> see the substituted
+    /// (non-null) value, never the original null.
+    /// </para>
+    /// <para>
+    /// Multiple <c>NullSubstitute</c> calls on the same member: last-call-wins (matches
+    /// <c>MapFrom</c>). Repeating clears the prior substitute.
+    /// </para>
+    /// <para>
+    /// On a map configured with <see cref="IMappingExpression{TSource, TDestination}.ConvertUsing(Func{TSource, TDestination})"/>,
+    /// per-member substitutes are silently inactive (the converter replaces all per-member assigns).
+    /// Substitutes flow base→derived through inheritance via the existing explicit-config
+    /// precedence rule. Substitutes do NOT auto-flip across <c>.ReverseMap()</c> —
+    /// reconfigure on the reverse expression.
+    /// </para>
+    /// <para>
+    /// Translates to SQL <c>COALESCE</c> in <c>ProjectTo&lt;&gt;()</c>.
+    /// </para>
+    /// </remarks>
+    void NullSubstitute<TSourceMember>(TSourceMember constant);
+
+    /// <summary>
+    /// Expression form of <see cref="NullSubstitute{TSourceMember}(TSourceMember)"/>.
+    /// Use for computed defaults (e.g., <c>() =&gt; DateTime.UtcNow</c>) that cannot be
+    /// expressed as a literal constant.
+    /// </summary>
+    /// <typeparam name="TSourceMember">
+    /// The source-member type. Compiler-inferred from the lambda body's return type.
+    /// </typeparam>
+    /// <param name="factory">A no-arg lambda that produces the fallback value.</param>
+    /// <remarks>
+    /// See <see cref="NullSubstitute{TSourceMember}(TSourceMember)"/> for storage,
+    /// projection, multi-call, ConvertUsing, and inheritance semantics — they apply identically.
+    /// <para>
+    /// The factory is stored as <see cref="Expression{TDelegate}"/>. For projection
+    /// translation, the body must be translatable by the underlying LINQ provider —
+    /// untranslatable factories fail at query-execution time with the provider's standard
+    /// error. Atlas does not pre-inspect lambdas for translatability.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="factory"/> is null.</exception>
+    void NullSubstitute<TSourceMember>(Expression<Func<TSourceMember>> factory);
 }
