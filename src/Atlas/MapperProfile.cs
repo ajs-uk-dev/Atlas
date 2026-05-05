@@ -26,6 +26,9 @@ public abstract class MapperProfile
     /// <summary>Used by <see cref="MapperConfigurationExpression"/> to harvest the registered maps.</summary>
     internal IReadOnlyList<TypeMap> GetTypeMaps() => _typeMaps;
 
+    /// <summary>TEMPORARY STUB — replaced by full implementation in Task 3.</summary>
+    internal IReadOnlyList<OpenGenericTypeMap> GetOpenGenericMaps() => Array.Empty<OpenGenericTypeMap>();
+
     public NamingConvention? SourceMemberNamingConvention { get; protected set; }
     public NamingConvention? DestinationMemberNamingConvention { get; protected set; }
     public bool? CaseSensitive { get; protected set; }

@@ -11,6 +11,7 @@ namespace Atlas;
 public sealed class MapperConfigurationExpression
 {
     private readonly Dictionary<TypePair, TypeMap> _typeMaps = new();
+    private readonly List<OpenGenericTypeMap> _openGenericMaps = new();
     private bool _built;
 
     public NamingConvention SourceMemberNamingConvention { get; set; } = NamingConvention.PascalCase;
@@ -51,6 +52,64 @@ public sealed class MapperConfigurationExpression
         RegisterTypeMap(map);
         return new MappingExpression<TSource, TDestination>(map, RegisterTypeMap);
     }
+
+    /// <summary>
+    /// Registers an open-generic class map. A single registration applies to every closed
+    /// instantiation at runtime via lazy materialization.
+    /// </summary>
+    /// <param name="sourceType">An open generic type definition (e.g., <c>typeof(Source&lt;&gt;)</c>).</param>
+    /// <param name="destinationType">An open generic type definition with the same arity.</param>
+    /// <param name="memberList">Validation policy for materialized closed pairs. Default <see cref="MemberList.None"/>.</param>
+    /// <exception cref="AtlasConfigurationException">
+    /// Thrown if either type is not an open generic type definition, or if the source and
+    /// destination have different generic arities.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown if <paramref name="sourceType"/> or <paramref name="destinationType"/> is null.
+    /// </exception>
+    public void CreateMap(Type sourceType, Type destinationType,
+                          MemberList memberList = MemberList.None)
+    {
+        EnsureMutable();
+        ArgumentNullException.ThrowIfNull(sourceType);
+        ArgumentNullException.ThrowIfNull(destinationType);
+
+        if (!sourceType.IsGenericTypeDefinition)
+            throw new AtlasConfigurationException(new List<ConfigurationError>
+            {
+                new(sourceType, destinationType, "(register)",
+                    $"Source must be an open generic type definition; got '{sourceType.Name}'. " +
+                    "Use CreateMap<TSource, TDestination>() for closed types.")
+            });
+
+        if (!destinationType.IsGenericTypeDefinition)
+            throw new AtlasConfigurationException(new List<ConfigurationError>
+            {
+                new(sourceType, destinationType, "(register)",
+                    $"Destination must be an open generic type definition; got '{destinationType.Name}'. " +
+                    "Use CreateMap<TSource, TDestination>() for closed types.")
+            });
+
+        var sourceArity = sourceType.GetGenericArguments().Length;
+        var destArity = destinationType.GetGenericArguments().Length;
+        if (sourceArity != destArity)
+            throw new AtlasConfigurationException(new List<ConfigurationError>
+            {
+                new(sourceType, destinationType, "(register)",
+                    $"Generic arity mismatch: source has {sourceArity} type parameter(s), destination has {destArity}.")
+            });
+
+        var openMap = new OpenGenericTypeMap(
+            sourceType,
+            destinationType,
+            memberList,
+            $"CreateMap(typeof({sourceType.Name}), typeof({destinationType.Name}))");
+
+        _openGenericMaps.Add(openMap);
+    }
+
+    /// <summary>Read-only snapshot of registered open-generic templates. Used by MapperConfiguration.</summary>
+    internal IReadOnlyList<OpenGenericTypeMap> GetOpenGenericMaps() => _openGenericMaps;
 
     private void RegisterTypeMap(TypeMap newTm)
     {
@@ -95,6 +154,10 @@ public sealed class MapperConfigurationExpression
         {
             RegisterTypeMap(map);
         }
+        foreach (var openMap in profile.GetOpenGenericMaps())
+        {
+            _openGenericMaps.Add(openMap);
+        }
     }
 
     public void AddMaps<TMarker>() => AddMaps(typeof(TMarker).Assembly);
@@ -107,6 +170,10 @@ public sealed class MapperConfigurationExpression
             foreach (var map in profile.GetTypeMaps())
             {
                 RegisterTypeMap(map);
+            }
+            foreach (var openMap in profile.GetOpenGenericMaps())
+            {
+                _openGenericMaps.Add(openMap);
             }
         }
     }
