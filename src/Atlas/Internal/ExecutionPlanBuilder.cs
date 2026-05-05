@@ -218,7 +218,20 @@ internal static class ExecutionPlanBuilder
                     sourceExpr = BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
                         ?? Expression.Default(p.ParameterType);
                 }
-                return WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
+                var transformed = WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
+
+                // Gate ctor-arg with predicates. Skip semantics for ctor args:
+                // p.DefaultValue if the param has one, else default(T) — a ctor argument
+                // cannot be omitted.
+                if (pm is not null)
+                {
+                    var fallback = p.HasDefaultValue
+                        ? (Expression)Expression.Constant(p.DefaultValue, p.ParameterType)
+                        : Expression.Default(p.ParameterType);
+                    transformed = WrapWithConditions(
+                        transformed, pm, srcParam, p.ParameterType, fallback);
+                }
+                return transformed;
             }).ToArray();
             newDest = Expression.New(ctor, args);
         }
