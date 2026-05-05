@@ -39,6 +39,22 @@ internal sealed class PropertyMap
     /// </summary>
     public IReadOnlyList<PropertyInfo>? DestinationPath { get; set; }
 
+    /// <summary>
+    /// Predicate evaluated BEFORE source-side resolution. Null when no PreCondition was
+    /// set on this binding. Stored as <see cref="LambdaExpression"/> so codegen can inline
+    /// the body (parameter-substitution) for both in-memory mapping and IQueryable
+    /// projection. Concrete signature: <c>Expression&lt;Func&lt;TSource, bool&gt;&gt;</c>.
+    /// </summary>
+    public LambdaExpression? PreCondition { get; set; }
+
+    /// <summary>
+    /// Predicate evaluated AFTER source-side resolution. Null when no Condition was set
+    /// on this binding. Concrete signature:
+    /// <c>Expression&lt;Func&lt;TSource, TMember, bool&gt;&gt;</c> — the second parameter
+    /// receives the resolved-value sub-expression at codegen time.
+    /// </summary>
+    public LambdaExpression? Condition { get; set; }
+
     public bool IsResolved => Ignored || HasConstant || CustomExpression is not null || SourcePath is not null;
 
     private PropertyMap(string name, Type destinationType, PropertyInfo? prop, ParameterInfo? ctorParam)

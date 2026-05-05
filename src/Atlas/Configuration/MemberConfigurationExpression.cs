@@ -15,6 +15,8 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
     private object? _constantValue;
     private bool _hasConstant;
     private bool _ignored;
+    private LambdaExpression? _preCondition;
+    private LambdaExpression? _condition;
 
     public void MapFrom<TSourceMember>(Expression<Func<TSource, TSourceMember>> sourceMember)
     {
@@ -40,6 +42,18 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
         _hasConstant = false;
     }
 
+    public void PreCondition(Expression<Func<TSource, bool>> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        _preCondition = predicate;
+    }
+
+    public void Condition(Expression<Func<TSource, TMember, bool>> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        _condition = predicate;
+    }
+
     public void ApplyTo(PropertyMap propertyMap)
     {
         propertyMap.SourcePath = null;
@@ -47,5 +61,7 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
         propertyMap.ConstantValue = _constantValue;
         propertyMap.HasConstant = _hasConstant;
         propertyMap.Ignored = _ignored;
+        propertyMap.PreCondition = _preCondition;
+        propertyMap.Condition = _condition;
     }
 }

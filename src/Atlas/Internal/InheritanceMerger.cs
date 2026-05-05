@@ -58,6 +58,8 @@ internal static class InheritanceMerger
         target.ConstantValue = source.ConstantValue;
         target.CustomExpression = source.CustomExpression;
         target.Ignored = source.Ignored;
+        target.PreCondition = source.PreCondition;
+        target.Condition = source.Condition;
         // Note: do NOT copy DestinationProperty / DestinationCtorParameter — those are
         // already correctly bound to the target's PropertyMap.
         // For Ignore-only bindings: source.SourcePath is null, which is fine — target gets null too.

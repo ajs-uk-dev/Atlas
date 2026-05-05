@@ -154,16 +154,23 @@ internal static class ExecutionPlanBuilder
 
             var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
 
+            Expression dstAccess;
+            Expression? intermediates = null;
             if (pm.DestinationPath is { } path && path.Count > 1)
             {
-                statements.Add(BuildNestedAssign(destParam, path, transformed));
+                (intermediates, dstAccess) = BuildNestedPathAccess(destParam, path);
             }
             else
             {
-                statements.Add(Expression.Assign(
-                    Expression.Property(destParam, pm.DestinationProperty),
-                    transformed));
+                dstAccess = Expression.Property(destParam, pm.DestinationProperty);
             }
+
+            var gatedAssign = BuildUpdateAssignWithConditions(
+                transformed, pm, srcParam, dstAccess, pm.DestinationProperty.PropertyType);
+
+            statements.Add(intermediates is null
+                ? gatedAssign
+                : Expression.Block(intermediates, gatedAssign));
         }
 
         // NEW: emit AfterHooks.
@@ -218,7 +225,20 @@ internal static class ExecutionPlanBuilder
                     sourceExpr = BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
                         ?? Expression.Default(p.ParameterType);
                 }
-                return WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
+                var transformed = WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
+
+                // Gate ctor-arg with predicates. Skip semantics for ctor args:
+                // p.DefaultValue if the param has one, else default(T) — a ctor argument
+                // cannot be omitted.
+                if (pm is not null)
+                {
+                    var fallback = p.HasDefaultValue
+                        ? (Expression)Expression.Constant(p.DefaultValue, p.ParameterType)
+                        : Expression.Default(p.ParameterType);
+                    transformed = WrapWithConditions(
+                        transformed, pm, srcParam, p.ParameterType, fallback);
+                }
+                return transformed;
             }).ToArray();
             newDest = Expression.New(ctor, args);
         }
@@ -241,16 +261,18 @@ internal static class ExecutionPlanBuilder
             if (sourceExpr is null) continue;
 
             var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
+            var assignValue = WrapWithConditions(
+                transformed, pm, srcParam, pm.DestinationProperty.PropertyType);
 
             if (pm.DestinationPath is { } path && path.Count > 1)
             {
-                statements.Add(BuildNestedAssign(destVar, path, transformed));
+                statements.Add(BuildNestedAssign(destVar, path, assignValue));
             }
             else
             {
                 statements.Add(Expression.Assign(
                     Expression.Property(destVar, pm.DestinationProperty),
-                    transformed));
+                    assignValue));
             }
         }
 
@@ -488,6 +510,36 @@ internal static class ExecutionPlanBuilder
         return iface?.GetGenericArguments()[0];
     }
 
+    /// <summary>
+    /// Splits a multi-level destination path into (a) the block of intermediate-coalesce
+    /// statements and (b) the leaf-access MemberExpression. Used by the gated update-path
+    /// so the predicate wraps just the leaf-assign, while intermediates are still
+    /// auto-instantiated regardless of the predicate's value.
+    /// </summary>
+    private static (Expression Intermediates, Expression LeafAccess) BuildNestedPathAccess(
+        Expression destRoot,
+        IReadOnlyList<PropertyInfo> destPath)
+    {
+        var statements = new List<Expression>();
+        Expression accessSoFar = destRoot;
+
+        for (int i = 0; i < destPath.Count - 1; i++)
+        {
+            var intermediateProp = destPath[i];
+            accessSoFar = Expression.Property(accessSoFar, intermediateProp);
+            var ctor = intermediateProp.PropertyType.GetConstructor(Type.EmptyTypes)
+                ?? throw new InvalidOperationException(
+                    $"Cannot unflatten path through {intermediateProp.DeclaringType?.Name}.{intermediateProp.Name}: " +
+                    $"intermediate type {intermediateProp.PropertyType.FullName} has no public parameterless constructor. " +
+                    "Call AssertConfigurationIsValid() at startup to catch this at config time.");
+            var coalesce = Expression.Coalesce(accessSoFar, Expression.New(ctor));
+            statements.Add(Expression.Assign(accessSoFar, coalesce));
+        }
+
+        var leafAccess = Expression.Property(accessSoFar, destPath[^1]);
+        return (Expression.Block(statements), leafAccess);
+    }
+
     private static Expression BuildNestedAssign(
         Expression destRoot,                       // dst (parameter or local var)
         IReadOnlyList<PropertyInfo> destPath,      // [Customer, Address, City]
@@ -538,6 +590,76 @@ internal static class ExecutionPlanBuilder
         return Expression.Invoke(Expression.Constant(typedDelegate), srcExpr, destExpr);
     }
 
+    private static Expression BuildUpdateAssignWithConditions(
+        Expression resolvedExpr,
+        PropertyMap pm,
+        ParameterExpression srcParam,
+        Expression dstAccess,
+        Type valueType)
+    {
+        // Inner: assign (gated by Condition if present).
+        Expression assign;
+        if (pm.Condition is not null)
+        {
+            var resolvedVar = Expression.Variable(valueType, "r");
+            var condBody = SubstituteTwoParams(pm.Condition, srcParam, resolvedVar);
+            assign = Expression.Block(
+                variables: new[] { resolvedVar },
+                Expression.Assign(resolvedVar, resolvedExpr),
+                Expression.IfThen(condBody, Expression.Assign(dstAccess, resolvedVar)));
+        }
+        else
+        {
+            assign = Expression.Assign(dstAccess, resolvedExpr);
+        }
+
+        // Outer: PreCondition gate.
+        if (pm.PreCondition is not null)
+        {
+            var preBody = SubstituteOneParam(pm.PreCondition, srcParam);
+            assign = Expression.IfThen(preBody, assign);
+        }
+
+        return assign;
+    }
+
+    private static Expression WrapWithConditions(
+        Expression resolvedExpr,
+        PropertyMap pm,
+        ParameterExpression srcParam,
+        Type valueType,
+        Expression? fallbackExpr = null)
+    {
+        if (pm.PreCondition is null && pm.Condition is null)
+            return resolvedExpr;
+
+        var fallback = fallbackExpr ?? Expression.Default(valueType);
+
+        // Inner: Condition gate (post-resolution).
+        Expression inner = resolvedExpr;
+        if (pm.Condition is not null)
+        {
+            // Hoist resolvedExpr into a local so it is evaluated once even if the
+            // condition body references it multiple times.
+            var resolvedVar = Expression.Variable(valueType, "r");
+            var condBody = SubstituteTwoParams(pm.Condition, srcParam, resolvedVar);
+            inner = Expression.Block(
+                variables: new[] { resolvedVar },
+                Expression.Assign(resolvedVar, resolvedExpr),
+                Expression.Condition(condBody, resolvedVar, fallback));
+        }
+
+        // Outer: PreCondition gate (pre-resolution). Wraps the entire Condition block,
+        // so resolvedExpr is not evaluated when PreCondition fails.
+        if (pm.PreCondition is not null)
+        {
+            var preBody = SubstituteOneParam(pm.PreCondition, srcParam);
+            inner = Expression.Condition(preBody, inner, fallback);
+        }
+
+        return inner;
+    }
+
     private static Expression WrapWithTransformers(
         Expression sourceExpr,
         Type destType,
@@ -557,6 +679,16 @@ internal static class ExecutionPlanBuilder
             current = paramSubst.Visit(transformer.Body)!;
         }
         return current;
+    }
+
+    private static Expression SubstituteOneParam(LambdaExpression lambda, Expression param0Replacement)
+        => new ParameterReplacer(lambda.Parameters[0], param0Replacement).Visit(lambda.Body)!;
+
+    private static Expression SubstituteTwoParams(LambdaExpression lambda,
+        Expression param0Replacement, Expression param1Replacement)
+    {
+        var afterFirst = new ParameterReplacer(lambda.Parameters[0], param0Replacement).Visit(lambda.Body)!;
+        return new ParameterReplacer(lambda.Parameters[1], param1Replacement).Visit(afterFirst)!;
     }
 
     private sealed class ParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
