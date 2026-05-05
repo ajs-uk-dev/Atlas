@@ -14,6 +14,8 @@ public sealed class MapperConfiguration
     private readonly StringToEnumCache _stringToEnumCache = new();
     internal StringToEnumCache Internal_StringToEnumCache => _stringToEnumCache;
     private readonly IServiceProvider? _serviceProvider;
+    private readonly IReadOnlyList<OpenGenericTypeMap> _openGenericMaps;
+    private readonly ValueTransformerCollection _globalTransformers;
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure, IServiceProvider serviceProvider)
         : this(BuildExpression(configure), serviceProvider)
@@ -25,7 +27,13 @@ public sealed class MapperConfiguration
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         _serviceProvider = serviceProvider;
-        _registry = new MapperRegistry(_registry.AllTypeMaps.ToList(), _stringToEnumCache, serviceProvider);
+        _registry = new MapperRegistry(
+            _registry.AllTypeMaps.ToList(),
+            _stringToEnumCache,
+            serviceProvider,
+            openGenericMaps: _openGenericMaps,
+            globalTransformers: _globalTransformers,
+            conventionOptions: _conventionOptions);
     }
 
     public MapperConfiguration(Action<MapperConfigurationExpression> configure)
@@ -43,6 +51,8 @@ public sealed class MapperConfiguration
             expression.CaseSensitive);
 
         _enumValidationEnabled = expression.EnumValidationEnabled;
+        _openGenericMaps = expression.GetOpenGenericMaps().ToList();
+        _globalTransformers = expression.ValueTransformers;
 
         var typeMaps = expression.GetTypeMaps().ToList();
         var pairIndex = typeMaps.ToDictionary(t => t.Pair);
@@ -63,7 +73,12 @@ public sealed class MapperConfiguration
             tm.Seal();
 
         expression.MarkBuilt();
-        _registry = new MapperRegistry(typeMaps, _stringToEnumCache);
+        _registry = new MapperRegistry(
+            typeMaps,
+            _stringToEnumCache,
+            openGenericMaps: _openGenericMaps,
+            globalTransformers: _globalTransformers,
+            conventionOptions: _conventionOptions);
     }
 
     private static MapperConfigurationExpression BuildExpression(Action<MapperConfigurationExpression> configure)
