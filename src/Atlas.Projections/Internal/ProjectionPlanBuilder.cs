@@ -98,19 +98,27 @@ internal static class ProjectionPlanBuilder
         if (pm.HasConstant)
             return Expression.Constant(pm.ConstantValue, targetType);
 
+        Expression resolved;
         if (pm.CustomExpression is not null)
         {
-            var rebound = ParameterReplacer.Replace(
+            resolved = ParameterReplacer.Replace(
                 pm.CustomExpression.Body,
                 pm.CustomExpression.Parameters[0],
                 srcExpr);
-            return ConvertOrInline(rebound, targetType, depth, registry, maxDepth);
+        }
+        else if (pm.SourcePath is not null)
+        {
+            resolved = BuildNullSafePath(srcExpr, pm.SourcePath.Members);
+        }
+        else
+        {
+            return null;
         }
 
-        if (pm.SourcePath is null) return null;
+        // NEW: apply NullSubstitute BEFORE ConvertOrInline.
+        resolved = ApplyProjectionNullSubstitute(resolved, pm);
 
-        var pathExpr = BuildNullSafePath(srcExpr, pm.SourcePath.Members);
-        return ConvertOrInline(pathExpr, targetType, depth, registry, maxDepth);
+        return ConvertOrInline(resolved, targetType, depth, registry, maxDepth);
     }
 
     private static Expression ConvertOrInline(
@@ -259,6 +267,22 @@ internal static class ProjectionPlanBuilder
         }
 
         return Expression.Condition(testExpr!, resolvedExpr, fallback);
+    }
+
+    private static Expression ApplyProjectionNullSubstitute(Expression resolvedExpr, PropertyMap pm)
+    {
+        if (pm.NullSubstitute is null) return resolvedExpr;
+
+        var substituteBody = pm.NullSubstitute.Body;
+
+        if (substituteBody.Type != resolvedExpr.Type)
+        {
+            if (Nullable.GetUnderlyingType(resolvedExpr.Type) == substituteBody.Type)
+                return Expression.Coalesce(resolvedExpr, substituteBody);
+            substituteBody = Expression.Convert(substituteBody, resolvedExpr.Type);
+        }
+
+        return Expression.Coalesce(resolvedExpr, substituteBody);
     }
 
     private static Expression WrapProjectionWithTransformers(
