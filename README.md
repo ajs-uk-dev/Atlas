@@ -315,6 +315,32 @@ Predicates flow base→derived through inheritance via the existing explicit-con
 rule. Predicates do NOT auto-flip across `.ReverseMap()` — reconfigure on the reverse
 expression.
 
+## Null substitution
+
+`NullSubstitute` supplies a fallback value when the resolved source member is null.
+The substitute is source-typed and runs through the same conversion pipeline as a
+real source value.
+
+```csharp
+CreateMap<CustomerEntity, CustomerDto>()
+    .ForMember(d => d.Name, opt => opt.NullSubstitute("Unknown"))
+    .ForMember(d => d.Score, opt => opt.NullSubstitute(0))
+    .ForMember(d => d.GeneratedId, opt => opt.NullSubstitute(() => Guid.NewGuid()));
+```
+
+Pipeline placement: **PreCondition → resolve → null-substitute → convert → transform →
+Condition → assign**. Value transformers and `Condition` see the substituted (non-null)
+value, never the original null.
+
+Validator rules:
+- **Unreachable substitute** on a non-nullable value-typed source member errors at
+  `AssertConfigurationIsValid()`.
+- **Type-mismatch** when the substitute's type isn't assignable to the source-member type errors.
+
+Translates to SQL `COALESCE` in `ProjectTo<>()`. Substitutes flow base→derived through
+inheritance via the existing explicit-config precedence rule. Substitutes do NOT
+auto-flip across `.ReverseMap()`.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -338,7 +364,6 @@ expression.
 
 Each of these has its own design doc to be written separately:
 
-- Null substitution
 - Open generics
 - Dynamic / dictionary-shaped sources
 - Reference handling (cycle detection)
