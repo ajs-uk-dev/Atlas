@@ -281,6 +281,40 @@ pre-inspect lambdas.
 direction or derived map declares its own type-map-level transformers, or relies on
 profile/global scope.
 
+## Conditional mapping
+
+Two per-member predicates that gate property mapping at runtime. `PreCondition(s => predicate)`
+runs **before** source-side resolution — use it when the resolution is expensive and would be
+wasted work if the predicate fails. `Condition((s, value) => predicate)` runs **after**
+resolution — use it when the predicate depends on the resolved value.
+
+Pipeline order: **PreCondition → resolve → Condition → assign**.
+
+```csharp
+CreateMap<Order, OrderDto>()
+    .ForMember(d => d.Total, opt =>
+    {
+        opt.PreCondition(s => s.Items != null && s.Items.Count > 0);
+        opt.MapFrom(s => s.Items.Sum(i => i.Price * i.Quantity));
+        opt.Condition((s, total) => total > 0);
+    });
+```
+
+Skip semantics:
+
+- **Fresh `Map<TDest>(src)`**: skipped property is `default(TMember)`.
+- **Update-in-place `Map<TS,TD>(src, existingDest)`**: skipped property preserves the
+  existing destination value.
+- **`ProjectTo<TDest>(query)`**: skipped property is `default(TMember)` (a projection
+  materializes a fresh row).
+
+Both predicates are `Expression<Func<...>>` and translate to SQL `CASE WHEN` in `ProjectTo`.
+Untranslatable predicates fail at query-execution time with the LINQ provider's standard error.
+
+Predicates flow base→derived through inheritance via the existing explicit-config precedence
+rule. Predicates do NOT auto-flip across `.ReverseMap()` — reconfigure on the reverse
+expression.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -304,7 +338,6 @@ profile/global scope.
 
 Each of these has its own design doc to be written separately:
 
-- Conditional mapping (`Condition`, `PreCondition`)
 - Null substitution
 - Open generics
 - Dynamic / dictionary-shaped sources
