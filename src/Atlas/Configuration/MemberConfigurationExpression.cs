@@ -17,6 +17,7 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
     private bool _ignored;
     private LambdaExpression? _preCondition;
     private LambdaExpression? _condition;
+    private LambdaExpression? _nullSubstitute;
 
     public void MapFrom<TSourceMember>(Expression<Func<TSource, TSourceMember>> sourceMember)
     {
@@ -54,6 +55,19 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
         _condition = predicate;
     }
 
+    public void NullSubstitute<TSourceMember>(TSourceMember constant)
+    {
+        // Wrap the constant as a parameterless lambda so storage is uniform with the Expression overload.
+        Expression<Func<TSourceMember>> wrapped = () => constant;
+        _nullSubstitute = wrapped;
+    }
+
+    public void NullSubstitute<TSourceMember>(Expression<Func<TSourceMember>> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _nullSubstitute = factory;
+    }
+
     public void ApplyTo(PropertyMap propertyMap)
     {
         propertyMap.SourcePath = null;
@@ -63,5 +77,6 @@ internal sealed class MemberConfigurationExpression<TSource, TDestination, TMemb
         propertyMap.Ignored = _ignored;
         propertyMap.PreCondition = _preCondition;
         propertyMap.Condition = _condition;
+        propertyMap.NullSubstitute = _nullSubstitute;
     }
 }

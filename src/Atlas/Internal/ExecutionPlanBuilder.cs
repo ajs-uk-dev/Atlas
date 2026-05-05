@@ -341,21 +341,28 @@ internal static class ExecutionPlanBuilder
         if (pm.HasConstant)
             return Expression.Constant(pm.ConstantValue, targetType);
 
+        Expression? resolved;
         if (pm.CustomExpression is not null)
         {
-            // Substitute the lambda's parameter with our srcParam.
             var rebound = new ParameterReplacer(pm.CustomExpression.Parameters[0], srcParam)
                 .Visit(pm.CustomExpression.Body);
-            return ConvertOrMap(rebound!, targetType, registry);
+            resolved = rebound;
         }
-
-        if (pm.SourcePath is not null)
+        else if (pm.SourcePath is not null)
         {
-            var pathExpr = BuildPathAccess(srcParam, pm.SourcePath.Members);
-            return ConvertOrMap(pathExpr, targetType, registry);
+            resolved = BuildPathAccess(srcParam, pm.SourcePath.Members);
+        }
+        else
+        {
+            return null;
         }
 
-        return null;
+        // NEW: apply NullSubstitute BEFORE ConvertOrMap so the substitute participates
+        // in the conversion pipeline exactly like a real value (numeric / enum auto-conversion,
+        // registered TypeMaps).
+        resolved = ApplyNullSubstitute(resolved!, pm);
+
+        return ConvertOrMap(resolved, targetType, registry);
     }
 
     private static Expression BuildPathAccess(Expression source, IReadOnlyList<PropertyInfo> path)
@@ -385,6 +392,19 @@ internal static class ExecutionPlanBuilder
         if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
 
         if (NumericConversions.HasImplicitConversion(source.Type, targetType))
+            return Expression.Convert(source, targetType);
+
+        // Handle asymmetric nullable cases that NumericConversions rejects at line 21
+        // (it requires BOTH sides to be nullable for the symmetric unwrap).
+        // Case A: Nullable<T> → U  — unwrap (and optionally widen) (e.g. int? → int, int? → long).
+        // Case B: T → Nullable<U>  — widen then wrap   (e.g. int → long?).
+        var srcUnderlying = Nullable.GetUnderlyingType(source.Type);
+        var dstUnderlying = Nullable.GetUnderlyingType(targetType);
+        if (srcUnderlying is not null && dstUnderlying is null
+            && (srcUnderlying == targetType || NumericConversions.HasImplicitConversion(srcUnderlying, targetType)))
+            return Expression.Convert(source, targetType);
+        if (srcUnderlying is null && dstUnderlying is not null
+            && (source.Type == dstUnderlying || NumericConversions.HasImplicitConversion(source.Type, dstUnderlying)))
             return Expression.Convert(source, targetType);
 
         // Enum auto-conversion (NEW): only if no registered typemap covers the pair.
@@ -658,6 +678,35 @@ internal static class ExecutionPlanBuilder
         }
 
         return inner;
+    }
+
+    private static Expression ApplyNullSubstitute(Expression resolvedExpr, PropertyMap pm)
+    {
+        if (pm.NullSubstitute is null) return resolvedExpr;
+
+        // The substitute is a parameterless lambda; inline its body directly.
+        var substituteBody = pm.NullSubstitute.Body;
+
+        // The substitute body's type is TSourceMember per the public API. resolvedExpr.Type
+        // may be either the same TSourceMember or a wrapped form (e.g., Nullable<int>).
+        // Coalesce handles Nullable<T> natively (returns the unwrapped T).
+        if (substituteBody.Type != resolvedExpr.Type)
+        {
+            // Common case: resolvedExpr is Nullable<T>, substituteBody is T.
+            // Expression.Coalesce(Nullable<T>, T) returns T (non-nullable). Re-wrap the result
+            // back to Nullable<T> so downstream ConvertOrMap sees a symmetric widening case
+            // (e.g., int? → long?) rather than asymmetric (int → long?), which
+            // NumericConversions rejects when one side is nullable and the other isn't.
+            if (Nullable.GetUnderlyingType(resolvedExpr.Type) == substituteBody.Type)
+            {
+                return Expression.Convert(
+                    Expression.Coalesce(resolvedExpr, substituteBody),
+                    resolvedExpr.Type);
+            }
+            substituteBody = Expression.Convert(substituteBody, resolvedExpr.Type);
+        }
+
+        return Expression.Coalesce(resolvedExpr, substituteBody);
     }
 
     private static Expression WrapWithTransformers(

@@ -55,6 +55,16 @@ internal sealed class PropertyMap
     /// </summary>
     public LambdaExpression? Condition { get; set; }
 
+    /// <summary>
+    /// Source-typed fallback used when the resolved source member is null. Stored as
+    /// <c>Expression&lt;Func&lt;TSourceMember&gt;&gt;</c>: the constant overload wraps as
+    /// <c>() =&gt; constant</c>; the Expression overload stores the user's lambda directly.
+    /// Codegen inlines the lambda body and wraps the resolved source expression in
+    /// <see cref="System.Linq.Expressions.Expression.Coalesce(System.Linq.Expressions.Expression, System.Linq.Expressions.Expression)"/>
+    /// upstream of <c>ConvertOrMap</c> / <c>ConvertOrInline</c>.
+    /// </summary>
+    public LambdaExpression? NullSubstitute { get; set; }
+
     public bool IsResolved => Ignored || HasConstant || CustomExpression is not null || SourcePath is not null;
 
     private PropertyMap(string name, Type destinationType, PropertyInfo? prop, ParameterInfo? ctorParam)

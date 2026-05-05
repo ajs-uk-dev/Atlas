@@ -27,6 +27,9 @@ internal static class ConfigurationValidator
             // Hook rules (always-on; covers BeforeMap/AfterMap action-type validation).
             ValidateHooks(tm, serviceProvider, errors);
 
+            // NullSubstitute rules (always-on; unreachable + type-mismatch).
+            ValidateNullSubstitutes(tm, errors);
+
             // Strict-mode enum source-side coverage (Task 9).
             if (enumValidationEnabled)
                 ValidateEnumStrict(tm, errors);
@@ -333,5 +336,55 @@ internal static class ConfigurationValidator
                     $"IncludeBase references {basePair.Source.Name} -> {basePair.Destination.Name} but no such map is registered."));
             }
         }
+    }
+
+    private static void ValidateNullSubstitutes(TypeMap tm, List<ConfigurationError> errors)
+    {
+        foreach (var pm in tm.PropertyMaps)
+        {
+            if (pm.NullSubstitute is null) continue;
+            if (pm.Ignored) continue;          // ignored members don't reach codegen
+            if (pm.HasConstant) continue;      // literal MapFrom can never be null
+
+            var sourceType = ResolveSourceMemberType(pm);
+            if (sourceType is null) continue;  // unresolved — covered by other validator rules
+
+            // Rule 1 — Unreachable: non-nullable value type can never be null.
+            if (sourceType.IsValueType && Nullable.GetUnderlyingType(sourceType) is null)
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, pm.Name,
+                    $"NullSubstitute on member '{pm.Name}' is unreachable: source member type " +
+                    $"{FormatSourceTypeName(sourceType)} is a non-nullable value type and cannot be null."));
+                continue;
+            }
+
+            // Rule 2 — Type mismatch: substitute must be assignable to source type.
+            var substituteType = pm.NullSubstitute.Body.Type;
+            var underlyingSourceType = Nullable.GetUnderlyingType(sourceType) ?? sourceType;
+
+            if (!underlyingSourceType.IsAssignableFrom(substituteType)
+                && !sourceType.IsAssignableFrom(substituteType)
+                && !NumericConversions.HasImplicitConversion(substituteType, underlyingSourceType))
+            {
+                errors.Add(new ConfigurationError(
+                    tm.SourceType, tm.DestinationType, pm.Name,
+                    $"NullSubstitute on member '{pm.Name}' has type {substituteType.Name} " +
+                    $"which is not assignable to source-member type {FormatSourceTypeName(sourceType)}."));
+            }
+        }
+    }
+
+    private static Type? ResolveSourceMemberType(PropertyMap pm)
+    {
+        if (pm.CustomExpression is not null) return pm.CustomExpression.Body.Type;
+        if (pm.SourcePath is { Members.Count: > 0 } sp) return sp.Members[^1].PropertyType;
+        return null;
+    }
+
+    private static string FormatSourceTypeName(Type sourceType)
+    {
+        var underlying = Nullable.GetUnderlyingType(sourceType);
+        return underlying is not null ? $"{underlying.Name}?" : sourceType.Name;
     }
 }

@@ -98,19 +98,27 @@ internal static class ProjectionPlanBuilder
         if (pm.HasConstant)
             return Expression.Constant(pm.ConstantValue, targetType);
 
+        Expression resolved;
         if (pm.CustomExpression is not null)
         {
-            var rebound = ParameterReplacer.Replace(
+            resolved = ParameterReplacer.Replace(
                 pm.CustomExpression.Body,
                 pm.CustomExpression.Parameters[0],
                 srcExpr);
-            return ConvertOrInline(rebound, targetType, depth, registry, maxDepth);
+        }
+        else if (pm.SourcePath is not null)
+        {
+            resolved = BuildNullSafePath(srcExpr, pm.SourcePath.Members);
+        }
+        else
+        {
+            return null;
         }
 
-        if (pm.SourcePath is null) return null;
+        // NEW: apply NullSubstitute BEFORE ConvertOrInline.
+        resolved = ApplyProjectionNullSubstitute(resolved, pm);
 
-        var pathExpr = BuildNullSafePath(srcExpr, pm.SourcePath.Members);
-        return ConvertOrInline(pathExpr, targetType, depth, registry, maxDepth);
+        return ConvertOrInline(resolved, targetType, depth, registry, maxDepth);
     }
 
     private static Expression ConvertOrInline(
@@ -133,6 +141,19 @@ internal static class ProjectionPlanBuilder
         }
         if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
         if (NumericConversions.HasImplicitConversion(source.Type, targetType))
+            return Expression.Convert(source, targetType);
+
+        // Handle asymmetric nullable cases that NumericConversions rejects at line 21
+        // (it requires BOTH sides to be nullable for the symmetric unwrap).
+        // Case A: Nullable<T> → U  — unwrap (and optionally widen) (e.g. int? → int, int? → long).
+        // Case B: T → Nullable<U>  — widen then wrap   (e.g. int → long?).
+        var srcUnderlying = Nullable.GetUnderlyingType(source.Type);
+        var dstUnderlying = Nullable.GetUnderlyingType(targetType);
+        if (srcUnderlying is not null && dstUnderlying is null
+            && (srcUnderlying == targetType || NumericConversions.HasImplicitConversion(srcUnderlying, targetType)))
+            return Expression.Convert(source, targetType);
+        if (srcUnderlying is null && dstUnderlying is not null
+            && (source.Type == dstUnderlying || NumericConversions.HasImplicitConversion(source.Type, dstUnderlying)))
             return Expression.Convert(source, targetType);
 
         if (IsCollection(source.Type) && IsCollection(targetType))
@@ -259,6 +280,31 @@ internal static class ProjectionPlanBuilder
         }
 
         return Expression.Condition(testExpr!, resolvedExpr, fallback);
+    }
+
+    private static Expression ApplyProjectionNullSubstitute(Expression resolvedExpr, PropertyMap pm)
+    {
+        if (pm.NullSubstitute is null) return resolvedExpr;
+
+        var substituteBody = pm.NullSubstitute.Body;
+
+        if (substituteBody.Type != resolvedExpr.Type)
+        {
+            // Common case: resolvedExpr is Nullable<T>, substituteBody is T.
+            // Expression.Coalesce(Nullable<T>, T) returns T (non-nullable). Re-wrap the result
+            // back to Nullable<T> so downstream ConvertOrInline sees a symmetric widening case
+            // (e.g., int? → long?) rather than asymmetric (int → long?), which
+            // NumericConversions rejects when one side is nullable and the other isn't.
+            if (Nullable.GetUnderlyingType(resolvedExpr.Type) == substituteBody.Type)
+            {
+                return Expression.Convert(
+                    Expression.Coalesce(resolvedExpr, substituteBody),
+                    resolvedExpr.Type);
+            }
+            substituteBody = Expression.Convert(substituteBody, resolvedExpr.Type);
+        }
+
+        return Expression.Coalesce(resolvedExpr, substituteBody);
     }
 
     private static Expression WrapProjectionWithTransformers(
