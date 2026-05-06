@@ -18,6 +18,12 @@ internal static class ProjectionCompatibility
             return false;
         }
 
+        if (tm.PreserveReferences)
+        {
+            reason = "PreserveReferences is not projectable — LINQ providers cannot model identity tracking";
+            return false;
+        }
+
         if (tm.CustomConverter is not null)
         {
             reason = "ConvertUsing(...) — delegate-form converter is in-memory only.";
