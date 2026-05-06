@@ -139,7 +139,7 @@ internal static class MappingInvoker
             return (T?)parsed;
 
         // Recursive dict→POCO via reflection on MappingInvoker.Invoke<IDictionary<string, object>, T>
-        if (value is IDictionary<string, object> sub && IsPocoLike(dstType))
+        if (value is IDictionary<string, object> sub && DynamicShape.IsPocoLike(dstType))
         {
             var invoke = typeof(MappingInvoker)
                 .GetMethod(nameof(Invoke))!
@@ -191,17 +191,6 @@ internal static class MappingInvoker
         parsed = null;
         return false;
     }
-
-    private static bool IsPocoLike(Type t)
-        => !t.IsPrimitive
-        && t != typeof(string)
-        && t != typeof(Guid)
-        && t != typeof(DateTime)
-        && t != typeof(DateTimeOffset)
-        && t != typeof(TimeSpan)
-        && t != typeof(decimal)
-        && !t.IsEnum
-        && !DynamicShape.IsDynamicShape(t);
 
     /// <summary>
     /// Dot-notation fallback: scans <paramref name="src"/> for keys starting with

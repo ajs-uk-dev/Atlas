@@ -216,6 +216,29 @@ public class MapperDictToPocoTests
     }
 
     [Fact]
+    public void Map_IListDestination_FromIEnumerableSource()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var dict = new Dictionary<string, object> { ["Values"] = new[] { 1, 2, 3 } };
+        var p = mapper.Map<IListPoco>(dict);
+        Assert.NotNull(p.Values);
+        Assert.Equal(new[] { 1, 2, 3 }, p.Values!);
+    }
+
+    [Fact]
+    public void Map_CaseSensitivityFalse_DoesNotAutomaticallyMatchLowerCaseKey_OnTopLevelLookup()
+    {
+        // Documents v1 behavior: CaseSensitive=false affects the dot-notation prefix scan,
+        // but top-level TryGetValue uses the source dictionary's own comparer (Ordinal by default).
+        // Users wanting fully case-insensitive matching must construct the source dict with
+        // StringComparer.OrdinalIgnoreCase.
+        var mapper = new MapperConfiguration(c => c.CaseSensitive = false).CreateMapper();
+        var dict = new Dictionary<string, object> { ["id"] = 42 };  // lowercase, Ordinal comparer
+        var p = mapper.Map<SimplePoco>(dict);
+        Assert.Equal(0, p.Id);  // NOT 42 — case-mismatch on top-level Ordinal lookup
+    }
+
+    [Fact]
     public void Map_OuterCollectionPair_RecursesIntoDynamicElementMap()
     {
         var mapper = new MapperConfiguration(_ => { }).CreateMapper();
@@ -247,4 +270,5 @@ public class MapperDictToPocoTests
     private sealed class OrderLinePoco { public string? Sku { get; set; } }
     private sealed class OrderWithLinesPoco { public List<OrderLinePoco>? Lines { get; set; } }
     private sealed class TagsArrayPoco { public string[]? Tags { get; set; } }
+    private sealed class IListPoco { public IList<int>? Values { get; set; } }
 }

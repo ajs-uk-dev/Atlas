@@ -44,7 +44,13 @@ internal static class DynamicShape
         return false;
     }
 
-    private static Type? GetCollectionElementType(Type t)
+    /// <summary>
+    /// Returns the element type if <paramref name="t"/> is a recognized collection type
+    /// (T[], List&lt;T&gt;, IEnumerable&lt;T&gt;, IList&lt;T&gt;, ICollection&lt;T&gt;,
+    /// IReadOnlyList&lt;T&gt;, or IReadOnlyCollection&lt;T&gt;); otherwise null.
+    /// Used by both <see cref="DynamicPlanBuilder"/> and <see cref="IsDynamicPair"/>.
+    /// </summary>
+    internal static Type? GetCollectionElementType(Type t)
     {
         if (t.IsArray) return t.GetElementType();
         if (t.IsGenericType)
@@ -57,6 +63,31 @@ internal static class DynamicShape
         }
         return null;
     }
+
+    /// <summary>
+    /// Returns true for POCO-like types: non-primitive, non-scalar, non-enum, non-dynamic,
+    /// and non-collection. Used by <see cref="DynamicPlanBuilder"/> (codegen classification)
+    /// and <see cref="MappingInvoker"/> (runtime recursive dict→POCO dispatch).
+    /// </summary>
+    internal static bool IsPocoLike(Type t)
+        => !t.IsPrimitive
+        && t != typeof(string)
+        && t != typeof(object)
+        && t != typeof(Guid)
+        && t != typeof(DateTime)
+        && t != typeof(DateTimeOffset)
+        && t != typeof(TimeSpan)
+        && t != typeof(decimal)
+        && !t.IsEnum
+        && !t.IsArray
+        && !IsDynamicShape(t)
+        && !(t.IsGenericType && (
+               t.GetGenericTypeDefinition() == typeof(List<>)
+            || t.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+            || t.GetGenericTypeDefinition() == typeof(ICollection<>)
+            || t.GetGenericTypeDefinition() == typeof(IList<>)
+            || t.GetGenericTypeDefinition() == typeof(IReadOnlyList<>)
+            || t.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)));
 
     /// <summary>
     /// Materializes a dynamic TypeMap on demand. Called by MapperRegistry.GetTypeMap when the

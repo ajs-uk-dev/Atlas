@@ -32,6 +32,17 @@ internal static class DynamicPlanBuilder
             return BuildPocoToDictLambda(typeMap, registry);
     }
 
+    /// <remarks>
+    /// Case-sensitivity asymmetry (v1 documented behavior):
+    /// Top-level dictionary lookups use <see cref="IDictionary{TKey,TValue}.TryGetValue"/>, which
+    /// honors whatever <see cref="IEqualityComparer{T}"/> the source dictionary was constructed with
+    /// (typically <see cref="StringComparer.Ordinal"/> for a plain <c>new Dictionary&lt;string,object&gt;</c>).
+    /// The <c>CaseSensitive</c> convention setting only affects the dot-notation prefix scan
+    /// (<see cref="MappingInvoker.ScanPrefix"/>). To get fully case-insensitive matching end-to-end
+    /// (top-level AND dot-notation), users must both:
+    ///   (1) construct their source dictionary with <c>StringComparer.OrdinalIgnoreCase</c>, AND
+    ///   (2) configure <c>MapperConfigurationExpression.CaseSensitive = false</c>.
+    /// </remarks>
     private static LambdaExpression BuildDictToPocoLambda(TypeMap typeMap, MapperRegistry registry)
     {
         if (typeMap.DestinationType.GetConstructor(Type.EmptyTypes) is null)
@@ -95,7 +106,7 @@ internal static class DynamicPlanBuilder
 
         // Determine which branch to use based on property type
         var collectionElementType = GetCollectionElementType(propType, out var isArray);
-        var isPocoLike = collectionElementType is null && IsPocoLike(propType);
+        var isPocoLike = collectionElementType is null && DynamicShape.IsPocoLike(propType);
 
         if (isPocoLike)
         {
@@ -256,53 +267,16 @@ internal static class DynamicPlanBuilder
             "POCO→Dict codegen lands in Task 7; this branch is intentionally unreachable for Tasks 4–6.");
 
     /// <summary>
-    /// Returns the element type if <paramref name="t"/> is List&lt;T&gt;, T[], or IEnumerable&lt;T&gt;;
-    /// otherwise null. Sets <paramref name="isArray"/> to true for array types.
+    /// Delegates to <see cref="DynamicShape.GetCollectionElementType"/> (the canonical widened version
+    /// that recognizes T[], List&lt;T&gt;, IList&lt;T&gt;, ICollection&lt;T&gt;, IEnumerable&lt;T&gt;,
+    /// IReadOnlyList&lt;T&gt;, and IReadOnlyCollection&lt;T&gt;) and sets <paramref name="isArray"/> for
+    /// the array case. For all non-array collection interfaces (IList&lt;T&gt;, ICollection&lt;T&gt;,
+    /// IReadOnlyList&lt;T&gt;, IReadOnlyCollection&lt;T&gt;, IEnumerable&lt;T&gt;) the codegen
+    /// materializes a List&lt;T&gt;, which implements every one of these interfaces.
     /// </summary>
     private static Type? GetCollectionElementType(Type t, out bool isArray)
     {
-        // Array
-        if (t.IsArray)
-        {
-            isArray = true;
-            return t.GetElementType();
-        }
-
-        isArray = false;
-
-        // List<T>
-        if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(List<>))
-            return t.GetGenericArguments()[0];
-
-        // IEnumerable<T> (but not string, which is IEnumerable<char>)
-        if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-            return t.GetGenericArguments()[0];
-
-        return null;
+        isArray = t.IsArray;
+        return DynamicShape.GetCollectionElementType(t);
     }
-
-    /// <summary>
-    /// Returns true for POCO-like types (non-primitive, non-scalar, non-collection, non-dynamic).
-    /// Must stay in sync with <see cref="MappingInvoker.IsPocoLike"/> (private there; duplicated here
-    /// for codegen classification without changing visibility).
-    /// </summary>
-    private static bool IsPocoLike(Type t)
-        => !t.IsPrimitive
-        && t != typeof(string)
-        && t != typeof(object)
-        && t != typeof(Guid)
-        && t != typeof(DateTime)
-        && t != typeof(DateTimeOffset)
-        && t != typeof(TimeSpan)
-        && t != typeof(decimal)
-        && !t.IsEnum
-        && !t.IsArray
-        && !DynamicShape.IsDynamicShape(t)
-        && !(t.IsGenericType && (
-               t.GetGenericTypeDefinition() == typeof(List<>)
-            || t.GetGenericTypeDefinition() == typeof(IEnumerable<>)
-            || t.GetGenericTypeDefinition() == typeof(ICollection<>)
-            || t.GetGenericTypeDefinition() == typeof(IList<>)
-            || t.GetGenericTypeDefinition() == typeof(IReadOnlyList<>)
-            || t.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)));
 }
