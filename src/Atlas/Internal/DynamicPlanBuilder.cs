@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -26,6 +27,8 @@ internal static class DynamicPlanBuilder
         .GetMethod(nameof(MappingInvoker.ScanPrefix), BindingFlags.Public | BindingFlags.Static)!;
     private static readonly ConstructorInfo _atlasMappingExceptionCtor =
         typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
+    private static readonly MethodInfo _serializeValue = typeof(MappingInvoker)
+        .GetMethod(nameof(MappingInvoker.SerializeValue), BindingFlags.Public | BindingFlags.Static)!;
 
     private static readonly Type _dictType = typeof(IDictionary<string, object>);
 
@@ -521,8 +524,64 @@ internal static class DynamicPlanBuilder
     }
 
     private static LambdaExpression BuildPocoToDictLambda(TypeMap typeMap, MapperRegistry registry)
-        => throw new NotImplementedException(
-            "POCO→Dict codegen lands in Task 7; this branch is intentionally unreachable for Tasks 4–6.");
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var dstType = typeMap.DestinationType;
+
+        // Concrete-type contract per design §3.3:
+        //   ExpandoObject              -> new ExpandoObject()
+        //   Dictionary<string, object> -> new Dictionary<string, object>(capacity)
+        //   IDictionary<string, object> -> new ExpandoObject() (declared as the abstraction)
+        var dstConcreteType = dstType == typeof(Dictionary<string, object>)
+            ? typeof(Dictionary<string, object>)
+            : typeof(ExpandoObject);
+
+        var dstAsConcrete = Expression.Variable(dstConcreteType, "dstConcrete");
+        var dstAsDict = Expression.Variable(typeof(IDictionary<string, object>), "dst");
+
+        Expression newDstExpr = dstConcreteType == typeof(Dictionary<string, object>)
+            ? Expression.New(typeof(Dictionary<string, object>).GetConstructor(new[] { typeof(int) })!,
+                  Expression.Constant(typeMap.PropertyMaps.Count))
+            : Expression.New(typeof(ExpandoObject));
+
+        var body = new List<Expression>
+        {
+            Expression.Assign(dstAsConcrete, newDstExpr),
+            Expression.Assign(dstAsDict,
+                dstConcreteType == typeof(Dictionary<string, object>)
+                    ? (Expression)dstAsConcrete
+                    : Expression.Convert(dstAsConcrete, typeof(IDictionary<string, object>)))
+        };
+
+        var indexer = typeof(IDictionary<string, object>).GetProperty("Item")!;
+        var registryConst = Expression.Constant(registry);
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DynamicKey is null || pm.SourcePath is null || pm.SourcePath.Members.Count == 0) continue;
+            var srcMember = pm.SourcePath.Members[0];
+            var srcMemberType = srcMember.PropertyType;
+
+            // dst[key] = MappingInvoker.SerializeValue((object)src.Member, typeof(MemberType), registry);
+            var memberAccess = Expression.Property(srcParam, srcMember);
+            var boxed = Expression.Convert(memberAccess, typeof(object));
+            var serializeCall = Expression.Call(_serializeValue, boxed,
+                Expression.Constant(srcMemberType, typeof(Type)), registryConst);
+
+            var assign = Expression.Assign(
+                Expression.MakeIndex(dstAsDict, indexer, new[] { Expression.Constant(pm.DynamicKey, typeof(string)) }),
+                serializeCall);
+
+            body.Add(assign);
+        }
+
+        body.Add(dstType == dstConcreteType
+            ? (Expression)dstAsConcrete
+            : Expression.Convert(dstAsConcrete, dstType));
+
+        var block = Expression.Block(new[] { dstAsConcrete, dstAsDict }, body);
+        return Expression.Lambda(block, srcParam);
+    }
 
     // ---- Helpers ----
 

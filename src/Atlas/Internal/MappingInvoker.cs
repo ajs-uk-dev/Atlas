@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Dynamic;
 
 namespace Atlas.Internal;
 
@@ -234,4 +235,35 @@ internal static class MappingInvoker
         var list = ConvertObjectToList<T>(value, registry, keyForDiagnostics);
         return list?.ToArray();
     }
+
+    /// <summary>
+    /// POCO→dict per-property emit helper. Boxes primitives, recurses through
+    /// MappingInvoker.Invoke&lt;TDecl, ExpandoObject&gt; for nested POCOs (Atlas v2 #10).
+    /// See docs/Atlas-Design-DynamicMapping.md §6.4.
+    /// </summary>
+    public static object? SerializeValue(object? value, Type declaredType, MapperRegistry registry)
+    {
+        if (value is null) return null;
+
+        var underlying = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
+
+        if (IsPrimitiveOrString(underlying)) return value;
+        if (underlying.IsEnum) return Convert.ChangeType(value, Enum.GetUnderlyingType(underlying));
+
+        // Nested POCO: recurse via MappingInvoker.Invoke<declaredType, ExpandoObject>
+        var invoke = typeof(MappingInvoker)
+            .GetMethod(nameof(Invoke))!
+            .MakeGenericMethod(declaredType, typeof(ExpandoObject));
+        return invoke.Invoke(null, new object?[] { registry, value });
+    }
+
+    private static bool IsPrimitiveOrString(Type t)
+        => t.IsPrimitive
+        || t == typeof(string)
+        || t == typeof(decimal)
+        || t == typeof(Guid)
+        || t == typeof(DateTime)
+        || t == typeof(DateTimeOffset)
+        || t == typeof(TimeSpan)
+        || t == typeof(byte[]);
 }
