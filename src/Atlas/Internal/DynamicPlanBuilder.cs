@@ -29,8 +29,13 @@ internal static class DynamicPlanBuilder
         typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
     private static readonly MethodInfo _serializeValue = typeof(MappingInvoker)
         .GetMethod(nameof(MappingInvoker.SerializeValue), BindingFlags.Public | BindingFlags.Static)!;
+    private static readonly MethodInfo _serializeCollection = typeof(MappingInvoker)
+        .GetMethod(nameof(MappingInvoker.SerializeCollection), BindingFlags.Public | BindingFlags.Static)!;
+    private static readonly MethodInfo _serializeDictionary = typeof(MappingInvoker)
+        .GetMethod(nameof(MappingInvoker.SerializeDictionary), BindingFlags.Public | BindingFlags.Static)!;
 
     private static readonly Type _dictType = typeof(IDictionary<string, object>);
+    private static readonly Type _dictOpenGeneric = typeof(Dictionary<,>);
 
     public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
     {
@@ -294,8 +299,39 @@ internal static class DynamicPlanBuilder
     }
 
     private static LambdaExpression BuildPocoToDictUpdateLambda(TypeMap typeMap, MapperRegistry registry)
-        => throw new NotImplementedException(
-            "POCO→Dict update-in-place codegen lands in Task 8.");
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var dstParam = Expression.Parameter(typeMap.DestinationType, "dst");
+
+        // Coerce destination to IDictionary<string, object> for indexer assignment.
+        var dstAsDict = Expression.Variable(typeof(IDictionary<string, object>), "dstDict");
+        var indexer = typeof(IDictionary<string, object>).GetProperty("Item")!;
+        var registryConst = Expression.Constant(registry);
+
+        var body = new List<Expression>
+        {
+            Expression.Assign(dstAsDict,
+                typeMap.DestinationType == typeof(IDictionary<string, object>)
+                    ? (Expression)dstParam
+                    : Expression.Convert(dstParam, typeof(IDictionary<string, object>)))
+        };
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DynamicKey is null || pm.SourcePath is null || pm.SourcePath.Members.Count == 0) continue;
+            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst);
+            var assign = Expression.Assign(
+                Expression.MakeIndex(dstAsDict, indexer, new[] { Expression.Constant(pm.DynamicKey, typeof(string)) }),
+                serializeExpr);
+            body.Add(assign);
+        }
+
+        // Return type must be void for update lambdas; add Expression.Empty() as last stmt.
+        body.Add(Expression.Empty());
+
+        var block = Expression.Block(new[] { dstAsDict }, body);
+        return Expression.Lambda(block, srcParam, dstParam);
+    }
 
     /// <summary>
     /// Emits the assignment expression for a single property.
@@ -559,19 +595,10 @@ internal static class DynamicPlanBuilder
         foreach (var pm in typeMap.PropertyMaps)
         {
             if (pm.DynamicKey is null || pm.SourcePath is null || pm.SourcePath.Members.Count == 0) continue;
-            var srcMember = pm.SourcePath.Members[0];
-            var srcMemberType = srcMember.PropertyType;
-
-            // dst[key] = MappingInvoker.SerializeValue((object)src.Member, typeof(MemberType), registry);
-            var memberAccess = Expression.Property(srcParam, srcMember);
-            var boxed = Expression.Convert(memberAccess, typeof(object));
-            var serializeCall = Expression.Call(_serializeValue, boxed,
-                Expression.Constant(srcMemberType, typeof(Type)), registryConst);
-
+            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst);
             var assign = Expression.Assign(
                 Expression.MakeIndex(dstAsDict, indexer, new[] { Expression.Constant(pm.DynamicKey, typeof(string)) }),
-                serializeCall);
-
+                serializeExpr);
             body.Add(assign);
         }
 
@@ -581,6 +608,86 @@ internal static class DynamicPlanBuilder
 
         var block = Expression.Block(new[] { dstAsConcrete, dstAsDict }, body);
         return Expression.Lambda(block, srcParam);
+    }
+
+    /// <summary>
+    /// Returns an <c>Expression</c> of type <c>object?</c> that serializes the source member
+    /// described by <paramref name="pm"/> to a dict-safe value:
+    /// <list type="bullet">
+    ///   <item>Generic collection (List&lt;T&gt;, T[], IEnumerable&lt;T&gt;, …) → SerializeCollection&lt;T&gt;</item>
+    ///   <item>Typed dictionary (Dictionary&lt;TKey, TValue&gt; where TValue is not object) → SerializeDictionary&lt;TKey, TValue&gt;</item>
+    ///   <item>Everything else (primitive, enum, nested POCO, string, …) → SerializeValue (Task 7 path)</item>
+    /// </list>
+    /// </summary>
+    private static Expression EmitSourceMemberSerialize(
+        PropertyMap pm,
+        ParameterExpression srcParam,
+        Expression registryConst)
+    {
+        var srcMember = pm.SourcePath!.Members[0];
+        var srcMemberType = srcMember.PropertyType;
+        var memberAccess = Expression.Property(srcParam, srcMember);
+
+        // 1. Generic collection (but NOT Dictionary itself — that's handled separately below)?
+        var collectionElementType = DynamicShape.GetCollectionElementType(srcMemberType);
+        if (collectionElementType is not null)
+        {
+            // SerializeCollection<TElement>(src.Member, registry) returns List<object?>?
+            // Cast result to object? for the dict indexer assignment.
+            var closedMethod = _serializeCollection.MakeGenericMethod(collectionElementType);
+            var call = Expression.Call(closedMethod, memberAccess, registryConst);
+            return Expression.Convert(call, typeof(object));
+        }
+
+        // 2. Dictionary<TKey, TValue> where TValue is NOT object (avoid treating dynamic shapes as typed dicts)?
+        if (IsTypedPocoDictionary(srcMemberType, out var keyType, out var valueType))
+        {
+            // SerializeDictionary<TKey, TValue>(src.Member, registry) returns IDictionary<string, object?>?
+            // Cast to object? for the dict indexer.
+            var closedMethod = _serializeDictionary.MakeGenericMethod(keyType!, valueType!);
+
+            // The parameter type for SerializeDictionary is IDictionary<TKey, TValue>; cast if needed.
+            var iDictType = typeof(IDictionary<,>).MakeGenericType(keyType!, valueType!);
+            var argExpr = srcMemberType == iDictType
+                ? (Expression)memberAccess
+                : Expression.Convert(memberAccess, iDictType);
+
+            var call = Expression.Call(closedMethod, argExpr, registryConst);
+            return Expression.Convert(call, typeof(object));
+        }
+
+        // 3. Scalar / enum / nested POCO / string — existing Task 7 SerializeValue path.
+        var boxed = Expression.Convert(memberAccess, typeof(object));
+        return Expression.Call(_serializeValue, boxed,
+            Expression.Constant(srcMemberType, typeof(Type)), registryConst);
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="t"/> is a closed <c>Dictionary&lt;TKey, TValue&gt;</c>
+    /// (or its IDictionary&lt;TKey, TValue&gt; interface variant) where TValue is not
+    /// <c>object</c> (to avoid confusing it with the dynamic shapes themselves).
+    /// Sets <paramref name="keyType"/> and <paramref name="valueType"/> on success.
+    /// </summary>
+    private static bool IsTypedPocoDictionary(Type t, out Type? keyType, out Type? valueType)
+    {
+        if (t.IsGenericType)
+        {
+            var def = t.GetGenericTypeDefinition();
+            if (def == typeof(Dictionary<,>) || def == typeof(IDictionary<,>))
+            {
+                var args = t.GetGenericArguments();
+                // Exclude Dictionary<string, object> — that is a dynamic shape, not a typed POCO dict.
+                if (args[1] != typeof(object))
+                {
+                    keyType = args[0];
+                    valueType = args[1];
+                    return true;
+                }
+            }
+        }
+        keyType = null;
+        valueType = null;
+        return false;
     }
 
     // ---- Helpers ----

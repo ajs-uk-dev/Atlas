@@ -237,6 +237,38 @@ internal static class MappingInvoker
     }
 
     /// <summary>
+    /// Serializes each element of a collection to <c>object?</c> (boxes primitives, recurses
+    /// through <see cref="SerializeValue"/> for POCOs). Returns null when <paramref name="src"/>
+    /// is null. Used by POCO→dict codegen for List/array/IEnumerable properties (Task 8).
+    /// </summary>
+    public static List<object?>? SerializeCollection<T>(IEnumerable<T>? src, MapperRegistry registry)
+    {
+        if (src is null) return null;
+        var list = new List<object?>();
+        foreach (var item in src)
+            list.Add(SerializeValue(item, typeof(T), registry));
+        return list;
+    }
+
+    /// <summary>
+    /// Serializes a typed dictionary to an <see cref="ExpandoObject"/> (returned as
+    /// <c>IDictionary&lt;string, object?&gt;</c>) with keys stringified via <c>ToString()</c>
+    /// and values recursed through <see cref="SerializeValue"/>. Returns null when
+    /// <paramref name="src"/> is null. Used by POCO→dict codegen for Dictionary&lt;TKey, TValue&gt;
+    /// properties (Task 8).
+    /// </summary>
+    public static IDictionary<string, object?>? SerializeDictionary<TKey, TValue>(
+        IDictionary<TKey, TValue>? src,
+        MapperRegistry registry) where TKey : notnull
+    {
+        if (src is null) return null;
+        IDictionary<string, object?> dst = new ExpandoObject();
+        foreach (var kv in src)
+            dst[kv.Key.ToString()!] = SerializeValue(kv.Value, typeof(TValue), registry);
+        return dst;
+    }
+
+    /// <summary>
     /// POCO→dict per-property emit helper. Boxes primitives, recurses through
     /// MappingInvoker.Invoke&lt;TDecl, ExpandoObject&gt; for nested POCOs (Atlas v2 #10).
     /// See docs/Atlas-Design-DynamicMapping.md §6.4.
