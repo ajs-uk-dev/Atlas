@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Dynamic;
+using System.Reflection;
 
 namespace Atlas.Internal;
 
@@ -28,4 +29,69 @@ internal static class DynamicShape
     /// </summary>
     internal static bool IsDynamicPair(TypePair pair) =>
         IsDynamicShape(pair.Source) ^ IsDynamicShape(pair.Destination);
+
+    /// <summary>
+    /// Materializes a dynamic TypeMap on demand. Called by MapperRegistry.GetTypeMap when the
+    /// closed-pair cache and open-generic template scan both miss and IsDynamicPair returns true.
+    /// Synthesizes one PropertyMap per public writable POCO member (dict→POCO direction) or
+    /// one per public readable POCO member (POCO→dict direction).
+    /// </summary>
+    internal static TypeMap MaterializeTypeMap(
+        TypePair pair,
+        ValueTransformerCollection globalTransformers,
+        ConventionOptions conventions)
+    {
+        if (IsDynamicShape(pair.Source))
+            return BuildDictToPocoTypeMap(pair, globalTransformers, conventions);
+        else
+            return BuildPocoToDictTypeMap(pair, globalTransformers, conventions);
+    }
+
+    private static TypeMap BuildDictToPocoTypeMap(
+        TypePair pair,
+        ValueTransformerCollection globalTransformers,
+        ConventionOptions conventions)
+    {
+        var pocoType = pair.Destination;
+        var tm = new TypeMap(pair.Source, pair.Destination, MemberList.None);
+        tm.IsDynamic = true;
+        tm.OriginatingProfile = null;
+        tm.RegistrationOrigin = "<dynamic>";
+
+        foreach (var prop in pocoType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!prop.CanWrite) continue;
+            if (prop.GetIndexParameters().Length > 0) continue;
+            tm.PropertyMaps.Add(PropertyMap.ForDictKey(prop, prop.Name));
+        }
+
+        TransformerResolver.Resolve(new[] { tm }, globalTransformers);
+
+        tm.Seal();
+        return tm;
+    }
+
+    private static TypeMap BuildPocoToDictTypeMap(
+        TypePair pair,
+        ValueTransformerCollection globalTransformers,
+        ConventionOptions conventions)
+    {
+        var pocoType = pair.Source;
+        var tm = new TypeMap(pair.Source, pair.Destination, MemberList.None);
+        tm.IsDynamic = true;
+        tm.OriginatingProfile = null;
+        tm.RegistrationOrigin = "<dynamic>";
+
+        foreach (var prop in pocoType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!prop.CanRead) continue;
+            if (prop.GetIndexParameters().Length > 0) continue;
+            tm.PropertyMaps.Add(PropertyMap.ForPocoSource(prop, prop.Name));
+        }
+
+        TransformerResolver.Resolve(new[] { tm }, globalTransformers);
+
+        tm.Seal();
+        return tm;
+    }
 }
