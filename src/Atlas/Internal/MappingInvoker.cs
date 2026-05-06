@@ -109,4 +109,95 @@ internal static class MappingInvoker
         }
         return dict;
     }
+
+    /// <summary>
+    /// Per-key value coercion helper for dict→POCO codegen (Atlas v2 #10).
+    /// Tries identity → numeric/IConvertible widening → string parsing (Guid/DateTime/TimeSpan/enum)
+    /// → recursive dict→POCO → registered TypeMap (srcRuntimeType, dstType).
+    /// Throws AtlasMappingException with diagnostic info when no path applies.
+    /// Nested map dispatch goes through reflection on MappingInvoker.Invoke&lt;TSrc, TDest&gt; so
+    /// no IMapper instance flows through the compiled lambda.
+    /// </summary>
+    public static T? ConvertObjectTo<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        if (value is null) return default;
+
+        var dstType = typeof(T);
+
+        if (value is T direct) return direct;
+
+        var srcType = value.GetType();
+
+        // Numeric / IConvertible widening
+        if (TryNumericOrConvertible(value, srcType, dstType, out var numericConverted))
+            return (T?)numericConverted;
+
+        // String parsing for Guid / DateTime / TimeSpan / enum / numeric-from-string
+        if (value is string s && TryParseString(s, dstType, out var parsed))
+            return (T?)parsed;
+
+        // Recursive dict→POCO via reflection on MappingInvoker.Invoke<IDictionary<string, object>, T>
+        if (value is IDictionary<string, object> sub && IsPocoLike(dstType))
+        {
+            var invoke = typeof(MappingInvoker)
+                .GetMethod(nameof(Invoke))!
+                .MakeGenericMethod(typeof(IDictionary<string, object>), dstType);
+            return (T?)invoke.Invoke(null, new object?[] { registry, sub });
+        }
+
+        // Registered (srcRuntimeType, dstType) TypeMap — dispatch via reflection on Invoke<srcType, T>
+        if (registry.GetTypeMap(new TypePair(srcType, dstType)) is not null)
+        {
+            var invoke = typeof(MappingInvoker)
+                .GetMethod(nameof(Invoke))!
+                .MakeGenericMethod(srcType, dstType);
+            return (T?)invoke.Invoke(null, new object?[] { registry, value });
+        }
+
+        throw new AtlasMappingException(
+            $"Cannot convert value of type '{srcType}' at key '{keyForDiagnostics}' to '{dstType}'.");
+    }
+
+    private static bool TryNumericOrConvertible(object value, Type srcType, Type dstType, out object? converted)
+    {
+        var underlyingDst = Nullable.GetUnderlyingType(dstType) ?? dstType;
+        if (underlyingDst.IsPrimitive || underlyingDst == typeof(decimal) || underlyingDst == typeof(string))
+        {
+            try
+            {
+                converted = Convert.ChangeType(value, underlyingDst);
+                return true;
+            }
+            catch { converted = null; return false; }
+        }
+        converted = null;
+        return false;
+    }
+
+    private static bool TryParseString(string s, Type dstType, out object? parsed)
+    {
+        var underlyingDst = Nullable.GetUnderlyingType(dstType) ?? dstType;
+        if (underlyingDst == typeof(Guid)) { if (Guid.TryParse(s, out var g)) { parsed = g; return true; } }
+        if (underlyingDst == typeof(DateTime)) { if (DateTime.TryParse(s, out var d)) { parsed = d; return true; } }
+        if (underlyingDst == typeof(DateTimeOffset)) { if (DateTimeOffset.TryParse(s, out var dt)) { parsed = dt; return true; } }
+        if (underlyingDst == typeof(TimeSpan)) { if (TimeSpan.TryParse(s, out var t)) { parsed = t; return true; } }
+        if (underlyingDst.IsEnum) { if (Enum.TryParse(underlyingDst, s, ignoreCase: true, out var e)) { parsed = e; return true; } }
+        if (underlyingDst.IsPrimitive || underlyingDst == typeof(decimal))
+        {
+            try { parsed = Convert.ChangeType(s, underlyingDst); return true; } catch { /* fall through */ }
+        }
+        parsed = null;
+        return false;
+    }
+
+    private static bool IsPocoLike(Type t)
+        => !t.IsPrimitive
+        && t != typeof(string)
+        && t != typeof(Guid)
+        && t != typeof(DateTime)
+        && t != typeof(DateTimeOffset)
+        && t != typeof(TimeSpan)
+        && t != typeof(decimal)
+        && !t.IsEnum
+        && !DynamicShape.IsDynamicShape(t);
 }

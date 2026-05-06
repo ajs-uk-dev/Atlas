@@ -29,7 +29,15 @@ internal sealed class Mapper : IMapper
         var method = typeof(MappingInvoker)
             .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!
             .MakeGenericMethod(srcType, typeof(TDestination));
-        return (TDestination)method.Invoke(null, [_registry, source])!;
+        try
+        {
+            return (TDestination)method.Invoke(null, [_registry, source])!;
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tie.InnerException).Throw();
+            throw; // unreachable — satisfies compiler
+        }
     }
 
     public void Map<TSource, TDestination>(TSource source, TDestination destination) =>
