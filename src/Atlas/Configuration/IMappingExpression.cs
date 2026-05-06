@@ -181,6 +181,28 @@ public interface IMappingExpression<TSource, TDestination>
     /// </exception>
     IMappingExpression<TSource, TDestination> WithFallback(TDestination fallbackValue);
 
+    /// <summary>
+    /// Marks this typemap as cycle-safe. When the user calls <see cref="IMapper.Map{TSrc, TDst}(TSrc)"/>
+    /// (or any sibling overload) and the typemap matched at the top level has PreserveReferences enabled,
+    /// Atlas allocates a per-call instance cache and threads it through every nested map call. Cycles
+    /// (e.g. <c>person.Boss = person</c>) terminate; multiply-referenced source instances produce a single
+    /// destination instance shared across all back-references in the destination graph.
+    /// <para>
+    /// The flag propagates through <c>.ReverseMap()</c>, <c>Include&lt;Base, Derived&gt;()</c>, and
+    /// open-generic templates. Cannot be combined with <c>ConvertUsing&lt;TConverter&gt;()</c>; the
+    /// validator throws <see cref="AtlasConfigurationException"/> at <c>AssertConfigurationIsValid()</c>
+    /// time.
+    /// </para>
+    /// <para>
+    /// ProjectTo rejects PreserveReferences typemaps — LINQ providers cannot model identity tracking.
+    /// Use <see cref="IMapper.Map{T}(object)"/> for cycle-safe in-memory mapping; use ProjectTo only
+    /// for non-cyclic projections.
+    /// </para>
+    /// See docs/Atlas-Design-ReferenceHandling.md §3.2.
+    /// </summary>
+    /// <returns>This expression, for fluent chaining.</returns>
+    IMappingExpression<TSource, TDestination> PreserveReferences();
+
     // ---- Before/After hooks ----
 
     /// <summary>

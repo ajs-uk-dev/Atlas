@@ -201,6 +201,13 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         return this;
     }
 
+    public IMappingExpression<TSource, TDestination> PreserveReferences()
+    {
+        TypeMap.EnsureMutable();
+        TypeMap.PreserveReferences = true;
+        return this;
+    }
+
     // ---- Before/After hooks ----
 
     public IMappingExpression<TSource, TDestination> BeforeMap(Action<TSource, TDestination> hook)
