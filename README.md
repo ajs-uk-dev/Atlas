@@ -426,6 +426,66 @@ Behavior summary:
 
 See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
 
+## Reference handling for cycles
+
+Atlas can map graphs with cycles or shared references safely, opt-in per typemap.
+Without this opt-in, mapping a cyclic graph stack-overflows — by design, since
+cycle detection has runtime cost.
+
+```csharp
+class Person
+{
+    public string Name { get; set; }
+    public Person Boss { get; set; }            // self-cycle: alice.Boss = alice
+}
+
+cfg.CreateMap<Person, PersonDto>().PreserveReferences();
+
+var alice = new Person { Name = "Alice" };
+alice.Boss = alice;                              // cycle
+var dto = mapper.Map<PersonDto>(alice);          // works — no stack overflow
+// dto.Boss == dto (same instance; identity preserved)
+```
+
+Behavior summary:
+
+- Convention: ONE flag on the OUTERMOST typemap of a potentially-cyclic graph
+  is enough. Inner typemaps inherit cycle-safety at runtime via a per-call
+  cache threaded through the call chain.
+- Pre-population semantics: a destination is registered into the cache BEFORE
+  its members are populated, which is what breaks cycles. Back-references
+  resolve to the partially-constructed destination, fully populated by the
+  time control returns to the caller.
+- Shared references are also preserved: a `Department` referenced by 5
+  `Employee` instances produces ONE `DepartmentDto` shared across all 5
+  destination back-references.
+- Hooks (`BeforeMap`/`AfterMap`), value transformers, conditional predicates,
+  and null substitutes fire on the FIRST allocation only — cache hits skip
+  the body entirely (no double-invocation of side effects).
+- Propagates through `.ReverseMap()`, `Include<>` inheritance, and open-generic
+  template materializations.
+- `Atlas.Projections` rejects PreserveReferences typemaps — LINQ providers
+  cannot model identity tracking. Use `mapper.Map<>()` for cycle-safe in-memory
+  mapping; use `ProjectTo` only for non-cyclic projections.
+
+Limitations (v1):
+
+- Cannot be combined with `ConvertUsing<TConverter>()` — the converter replaces
+  the body that the cache would wrap. Validator rejects the combination at
+  `AssertConfigurationIsValid()` time.
+- The cycle-safety flag must be on the OUTERMOST typemap of a potentially-cyclic
+  graph. Marking only an INNER typemap (e.g., Employee → EmployeeDto) without
+  marking its OUTER caller (e.g., Department → DepartmentDto) means the inner
+  cycle protection is unreachable from the outer call. v3 may relax this.
+- No custom reference-handler interface in v1 — built-in handler only.
+- No per-call opt-in (`mapper.Map(src, opts => ...)`) in v1 — per-typemap only.
+- Hooks and transformers cannot inspect the cycle-cache directly; they see
+  destinations they create. Cyclically-referenced destinations may appear
+  partially-populated to a hook fired during their own allocation phase
+  (a known and documented limitation).
+
+See `docs/Atlas-Design-ReferenceHandling.md` for the full specification.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -449,7 +509,6 @@ See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
 
 Each of these has its own design doc to be written separately:
 
-- Reference handling (cycle detection)
 - Attribute-based configuration
 - Expression translation (`UseAsDataSource`)
 
