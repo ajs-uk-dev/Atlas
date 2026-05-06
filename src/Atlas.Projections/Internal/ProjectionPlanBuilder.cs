@@ -25,6 +25,7 @@ internal static class ProjectionPlanBuilder
     private static Expression BuildBody(TypeMap tm, Expression srcExpr, int depth, MapperRegistry registry, int maxDepth)
     {
         RejectHooksOrThrow(tm);
+        RejectDynamicOrThrow(tm);
 
         var (ctor, ctorParamMaps, propertyMaps) = ClassifyBindings(tm);
 
@@ -332,6 +333,18 @@ internal static class ProjectionPlanBuilder
         {
             new(tm.SourceType, tm.DestinationType, "(BeforeMap/AfterMap)",
                 $"map has {tm.BeforeHooks.Count} BeforeMap and {tm.AfterHooks.Count} AfterMap hook(s) — hooks are not translatable to IQueryable. Use mapper.Map<>() instead, or remove the hooks.")
+        });
+    }
+
+    private static void RejectDynamicOrThrow(TypeMap tm)
+    {
+        if (!tm.IsDynamic) return;
+        throw new AtlasProjectionException(new List<ProjectionDiagnostic>
+        {
+            new(tm.SourceType, tm.DestinationType, "(Dynamic mapping)",
+                $"map is a dynamic-shape mapping ({tm.SourceType} → {tm.DestinationType}); " +
+                $"LINQ providers cannot translate runtime dictionary key lookups against arbitrary keys. " +
+                $"Use mapper.Map<>() instead.")
         });
     }
 
