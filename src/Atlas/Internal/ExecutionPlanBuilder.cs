@@ -147,11 +147,49 @@ internal static class ExecutionPlanBuilder
         if (typeMap.IsDynamic)
             return DynamicPlanBuilder.BuildUpdate(typeMap, registry);
 
-        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var srcType = typeMap.SourceType;
+        var dstType = typeMap.DestinationType;
+        var srcParam = Expression.Parameter(srcType, "src");
         var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
-        var destParam = Expression.Parameter(typeMap.DestinationType, "dest");
+        var destParam = Expression.Parameter(dstType, "dest");
+
+        // Return label for early-exit (void lambda uses a void-typed label).
+        var returnLabel = Expression.Label("return");
 
         var statements = new List<Expression>();
+        var locals = new List<ParameterExpression>();
+
+        // ── Cache preamble: only for reference-type sources ──────────────────────
+        if (srcType.IsClass)
+        {
+            // Cache check: if (ctx != null && ctx.TryGet((object)src, typeof(TDst), out cached))
+            //                 return;   // already being updated — skip to break cycles
+            var cachedVar = Expression.Variable(typeof(object), "cached");
+            locals.Add(cachedVar);
+
+            var ctxNotNull = Expression.NotEqual(
+                ctxParam, Expression.Constant(null, typeof(MappingContext)));
+            var tryGetCall = Expression.Call(
+                ctxParam,
+                MappingContextTryGetMethod,
+                Expression.Convert(srcParam, typeof(object)),
+                Expression.Constant(dstType, typeof(Type)),
+                cachedVar);
+            statements.Add(Expression.IfThen(
+                Expression.AndAlso(ctxNotNull, tryGetCall),
+                Expression.Return(returnLabel)));
+
+            // Cache register: ctx.Register immediately before member emit.
+            // if (ctx != null) ctx.Register((object)src, typeof(TDst), (object)dest);
+            statements.Add(Expression.IfThen(
+                Expression.NotEqual(ctxParam, Expression.Constant(null, typeof(MappingContext))),
+                Expression.Call(
+                    ctxParam,
+                    MappingContextRegisterMethod,
+                    Expression.Convert(srcParam, typeof(object)),
+                    Expression.Constant(dstType, typeof(Type)),
+                    Expression.Convert(destParam, typeof(object)))));
+        }
 
         // NEW: emit BeforeHooks.
         foreach (var hookEntry in typeMap.BeforeHooks)
@@ -190,14 +228,19 @@ internal static class ExecutionPlanBuilder
         foreach (var hookEntry in typeMap.AfterHooks)
             statements.Add(BuildHookCall(hookEntry, srcParam, destParam, registry));
 
-        Expression body = statements.Count > 0
-            ? Expression.Block(statements)
-            : Expression.Empty();
+        // Return label at end (default fall-through for void lambdas).
+        statements.Add(Expression.Label(returnLabel));
 
-        if (typeMap.SourceType.IsClass)
+        Expression body = locals.Count > 0
+            ? Expression.Block(locals, statements)
+            : (statements.Count > 0
+                ? Expression.Block(statements)
+                : Expression.Empty());
+
+        if (srcType.IsClass)
         {
             body = Expression.IfThen(
-                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType))),
+                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, srcType))),
                 body);
         }
 
@@ -205,6 +248,18 @@ internal static class ExecutionPlanBuilder
     }
 
     // ---- POCO ----
+
+    // Cached MethodInfo for MappingContext.TryGet and MappingContext.Register,
+    // resolved once to avoid repeated GetMethod lookups per compile.
+    private static readonly MethodInfo MappingContextTryGetMethod =
+        typeof(MappingContext).GetMethod(
+            nameof(MappingContext.TryGet),
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+    private static readonly MethodInfo MappingContextRegisterMethod =
+        typeof(MappingContext).GetMethod(
+            nameof(MappingContext.Register),
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     private static LambdaExpression BuildPocoLambda(TypeMap typeMap, MapperRegistry registry)
     {
@@ -257,10 +312,50 @@ internal static class ExecutionPlanBuilder
             newDest = Expression.New(ctor, args);
         }
 
-        var statements = new List<Expression>
+        // Return label used by the cache-hit early-exit path.
+        var returnLabel = Expression.Label(dstType, "return");
+
+        var statements = new List<Expression>();
+        var locals = new List<ParameterExpression> { destVar };
+
+        // ── Cache preamble: only for reference-type sources ──────────────────────
+        if (srcType.IsClass)
         {
-            Expression.Assign(destVar, newDest),
-        };
+            // Declare a local to receive the out parameter from TryGet.
+            var cachedVar = Expression.Variable(typeof(object), "cached");
+            locals.Add(cachedVar);
+
+            // if (ctx != null && ctx.TryGet((object)src, typeof(TDst), out cached))
+            //     return (TDst)cached;
+            var ctxNotNull = Expression.NotEqual(
+                ctxParam, Expression.Constant(null, typeof(MappingContext)));
+            var tryGetCall = Expression.Call(
+                ctxParam,
+                MappingContextTryGetMethod,
+                Expression.Convert(srcParam, typeof(object)),
+                Expression.Constant(dstType, typeof(Type)),
+                cachedVar);
+            statements.Add(Expression.IfThen(
+                Expression.AndAlso(ctxNotNull, tryGetCall),
+                Expression.Return(returnLabel, Expression.Convert(cachedVar, dstType))));
+        }
+
+        // ── Allocate destination ─────────────────────────────────────────────────
+        statements.Add(Expression.Assign(destVar, newDest));
+
+        // ── Cache register: immediately after allocation, before member emit ─────
+        if (srcType.IsClass)
+        {
+            // if (ctx != null) ctx.Register((object)src, typeof(TDst), (object)dest);
+            statements.Add(Expression.IfThen(
+                Expression.NotEqual(ctxParam, Expression.Constant(null, typeof(MappingContext))),
+                Expression.Call(
+                    ctxParam,
+                    MappingContextRegisterMethod,
+                    Expression.Convert(srcParam, typeof(object)),
+                    Expression.Constant(dstType, typeof(Type)),
+                    Expression.Convert(destVar, typeof(object)))));
+        }
 
         // NEW: emit BeforeHooks (FIFO order).
         foreach (var hookEntry in typeMap.BeforeHooks)
@@ -294,9 +389,10 @@ internal static class ExecutionPlanBuilder
         foreach (var hookEntry in typeMap.AfterHooks)
             statements.Add(BuildHookCall(hookEntry, srcParam, destVar, registry));
 
-        statements.Add(destVar);
+        // Return label at end: default value is destVar (normal non-cached path).
+        statements.Add(Expression.Label(returnLabel, destVar));
 
-        Expression body = Expression.Block(new[] { destVar }, statements);
+        Expression body = Expression.Block(locals, statements);
 
         if (srcType.IsClass)
         {
