@@ -37,9 +37,9 @@ public class MapperDictToPocoTests
     public void Map_DictWithStringValue_ParsesToGuid()
     {
         var mapper = new MapperConfiguration(_ => { }).CreateMapper();
-        var dict = new Dictionary<string, object> { ["Token"] = "550e8400-e29b-41d4-a716-446655440000" };
+        var dict = new Dictionary<string, object> { ["Identifier"] = "11111111-2222-3333-4444-555555555555" };
         var p = mapper.Map<GuidPoco>(dict);
-        Assert.Equal(Guid.Parse("550e8400-e29b-41d4-a716-446655440000"), p.Token);
+        Assert.Equal(Guid.Parse("11111111-2222-3333-4444-555555555555"), p.Identifier);
     }
 
     [Fact]
@@ -325,7 +325,7 @@ public class MapperDictToPocoTests
         public int Id { get; set; }
         public string? Name { get; set; }
     }
-    private sealed class GuidPoco { public Guid Token { get; set; } }
+    private sealed class GuidPoco { public Guid Identifier { get; set; } }
     private sealed class DatePoco { public DateTime When { get; set; } }
     private sealed class NullableIntPoco { public int? MaybeAge { get; set; } }
     private sealed class CustomerPoco { public string? Name { get; set; } }

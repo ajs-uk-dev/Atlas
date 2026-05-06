@@ -62,9 +62,9 @@ public class MapperPocoToDictTests
     public void Map_GuidProperty_EmitsAsBoxedGuid()
     {
         var mapper = new MapperConfiguration(_ => { }).CreateMapper();
-        var p = new GuidPoco { Token = Guid.Parse("550e8400-e29b-41d4-a716-446655440000") };
+        var p = new GuidPoco { Identifier = Guid.Parse("11111111-2222-3333-4444-555555555555") };
         var d = mapper.Map<Dictionary<string, object>>(p);
-        Assert.Equal(Guid.Parse("550e8400-e29b-41d4-a716-446655440000"), d["Token"]);
+        Assert.Equal(Guid.Parse("11111111-2222-3333-4444-555555555555"), d["Identifier"]);
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class MapperPocoToDictTests
         public string? Name { get; set; }
     }
     private sealed class DatePoco { public DateTime When { get; set; } }
-    private sealed class GuidPoco { public Guid Token { get; set; } }
+    private sealed class GuidPoco { public Guid Identifier { get; set; } }
 
     // New fixtures for Task 8 tests
     private sealed class CustomerPoco { public string? Name { get; set; } }
