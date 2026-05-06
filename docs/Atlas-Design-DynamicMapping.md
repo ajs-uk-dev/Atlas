@@ -750,9 +750,17 @@ To make self-pair round-trips work without explicit registration, the **detector
 
 ### 7.3 Collection-of-dynamic recursion
 
-`List<IDictionary<string, object>>` → `List<MyPoco>`: the OUTER pair is `(List<IDictionary<string, object>>, List<MyPoco>)` — neither side is a dynamic shape, so the detector doesn't fire on the outer pair. The existing collection-element-mapping path runs, with element pair `(IDictionary<string, object>, MyPoco)` — for which the detector DOES fire on the recursive lookup. So this works naturally without special casing.
+`List<IDictionary<string, object>>` → `List<MyPoco>`: the OUTER pair is `(List<IDictionary<string, object>>, List<MyPoco>)` — neither side is itself one of the three named dynamic shapes. **However**, the detector DOES need to fire on this outer pair so that `MapperRegistry.GetTypeMap` returns a non-null `TypeMap` (otherwise `MappingInvoker.Invoke` throws "no map registered" before any per-element recursion has a chance to engage).
 
-Same applies to `List<MyPoco>` → `List<ExpandoObject>` (POCO→dict direction), `IEnumerable<...>` and `T[]` source/dest types, and arrays-of-dynamic.
+The shipped implementation handles this in two stages:
+
+1. **Outer-pair detection.** `DynamicShape.IsDynamicPair` recognizes `(IEnumerable<X>, IEnumerable<Y>)` pairs (and other collection shapes from `GetCollectionElementType`'s allowlist) where EITHER element type is a dynamic shape. `DynamicShape.MaterializeTypeMap` synthesizes a placeholder `TypeMap` with `IsDynamic = false`, `MemberList.None`, and no PropertyMaps — just enough metadata so `ExecutionPlanBuilder.BuildBaseBody` routes it through the existing v1 `BuildCollectionLambda` path. This is the `BuildCollectionDynamicTypeMap` factory.
+
+2. **Per-element recursion.** `BuildCollectionLambda` emits `MappingInvoker.InvokeToList<TSrcEl, TDstEl>(registry, src)` (or array variant). Each element call re-enters `MappingInvoker.Invoke` for the per-element pair `(IDictionary<string, object>, MyPoco)` (or the reverse), which IS a regular XOR-dynamic pair — so stage 3 of `GetTypeMap` materializes a regular dict↔POCO dynamic TypeMap and the per-element codegen runs.
+
+Same logic applies symmetrically to `List<MyPoco>` → `List<ExpandoObject>` (POCO→dict direction), `IEnumerable<...>` and `T[]` source/dest types, and arrays-of-dynamic.
+
+> **Note:** The original §7.3 wording in this design's first revision claimed "the existing collection-element-mapping path runs … so this works naturally without special casing." That claim was wrong; without the outer-pair detection, the OUTER `GetTypeMap` lookup returns null and the call throws before any per-element work happens. The two-stage bridging above is what actually ships.
 
 ### 7.4 Profile-scoped value transformer composition (deferred to v3)
 
