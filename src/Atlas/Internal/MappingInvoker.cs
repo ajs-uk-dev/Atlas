@@ -1,3 +1,5 @@
+using System.Collections;
+
 namespace Atlas.Internal;
 
 /// <summary>
@@ -200,4 +202,47 @@ internal static class MappingInvoker
         && t != typeof(decimal)
         && !t.IsEnum
         && !DynamicShape.IsDynamicShape(t);
+
+    /// <summary>
+    /// Dot-notation fallback: scans <paramref name="src"/> for keys starting with
+    /// <paramref name="prefix"/>, strips the prefix, and returns a synthesized nested dict.
+    /// Returns null when no matching keys exist. See docs/Atlas-Design-DynamicMapping.md §5.4.
+    /// </summary>
+    public static IDictionary<string, object>? ScanPrefix(
+        IDictionary<string, object> src,
+        string prefix,
+        StringComparison cmp)
+    {
+        Dictionary<string, object>? result = null;
+        foreach (var kv in src)
+        {
+            if (kv.Key.StartsWith(prefix, cmp))
+            {
+                result ??= new Dictionary<string, object>();
+                result[kv.Key.Substring(prefix.Length)] = kv.Value;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>POCO collection materialization helper for dict→POCO codegen.</summary>
+    public static List<T>? ConvertObjectToList<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        if (value is null) return null;
+        if (value is IEnumerable enumerable)
+        {
+            var list = new List<T>();
+            foreach (var item in enumerable)
+                list.Add(ConvertObjectTo<T>(item, registry, keyForDiagnostics)!);
+            return list;
+        }
+        throw new AtlasMappingException(
+            $"Cannot convert value of type '{value.GetType()}' at key '{keyForDiagnostics}' to 'List<{typeof(T)}>'.");
+    }
+
+    public static T[]? ConvertObjectToArray<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        var list = ConvertObjectToList<T>(value, registry, keyForDiagnostics);
+        return list?.ToArray();
+    }
 }

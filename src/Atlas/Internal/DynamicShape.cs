@@ -24,27 +24,81 @@ internal static class DynamicShape
     internal static bool IsDynamicShape(Type t) => Array.IndexOf(_shapes, t) >= 0;
 
     /// <summary>
-    /// True iff exactly one side of the pair is a recognized dynamic shape (XOR).
+    /// True iff exactly one side of the pair is a recognized dynamic shape (XOR), OR
+    /// both sides are collections (array / List&lt;T&gt;) where the source element type is a
+    /// recognized dynamic shape and the destination element type is a POCO.
     /// Self-pairs (both dynamic) and non-pairs (neither dynamic) return false.
     /// </summary>
-    internal static bool IsDynamicPair(TypePair pair) =>
-        IsDynamicShape(pair.Source) ^ IsDynamicShape(pair.Destination);
+    internal static bool IsDynamicPair(TypePair pair)
+    {
+        if (IsDynamicShape(pair.Source) ^ IsDynamicShape(pair.Destination))
+            return true;
+
+        // Collection-of-dynamic-shape pairs, e.g.
+        //   List<IDictionary<string,object>> → List<SimplePoco>
+        var srcEl = GetCollectionElementType(pair.Source);
+        var dstEl = GetCollectionElementType(pair.Destination);
+        if (srcEl is not null && dstEl is not null && IsDynamicShape(srcEl))
+            return true;
+
+        return false;
+    }
+
+    private static Type? GetCollectionElementType(Type t)
+    {
+        if (t.IsArray) return t.GetElementType();
+        if (t.IsGenericType)
+        {
+            var def = t.GetGenericTypeDefinition();
+            if (def == typeof(List<>) || def == typeof(IList<>) || def == typeof(IEnumerable<>)
+                || def == typeof(ICollection<>) || def == typeof(IReadOnlyList<>)
+                || def == typeof(IReadOnlyCollection<>))
+                return t.GetGenericArguments()[0];
+        }
+        return null;
+    }
 
     /// <summary>
     /// Materializes a dynamic TypeMap on demand. Called by MapperRegistry.GetTypeMap when the
     /// closed-pair cache and open-generic template scan both miss and IsDynamicPair returns true.
     /// Synthesizes one PropertyMap per public writable POCO member (dict→POCO direction) or
-    /// one per public readable POCO member (POCO→dict direction).
+    /// one per public readable POCO member (POCO→dict direction). For collection-of-dynamic
+    /// pairs (e.g. List&lt;IDictionary&lt;string,object&gt;&gt; → List&lt;TPoco&gt;), returns a minimal
+    /// TypeMap that the collection branch of ExecutionPlanBuilder will pick up.
     /// </summary>
     internal static TypeMap MaterializeTypeMap(
         TypePair pair,
         ValueTransformerCollection globalTransformers,
         ConventionOptions conventions)
     {
+        // Collection-of-dynamic-shape: both sides are collections, source element is a dynamic shape.
+        var srcEl = GetCollectionElementType(pair.Source);
+        var dstEl = GetCollectionElementType(pair.Destination);
+        if (srcEl is not null && dstEl is not null && IsDynamicShape(srcEl))
+            return BuildCollectionDynamicTypeMap(pair, globalTransformers);
+
         if (IsDynamicShape(pair.Source))
             return BuildDictToPocoTypeMap(pair, globalTransformers, conventions);
         else
             return BuildPocoToDictTypeMap(pair, globalTransformers, conventions);
+    }
+
+    private static TypeMap BuildCollectionDynamicTypeMap(
+        TypePair pair,
+        ValueTransformerCollection globalTransformers)
+    {
+        // Produce a minimal, non-dynamic TypeMap. ExecutionPlanBuilder sees IsDynamic=false and
+        // IsCollection(src) && IsCollection(dst), so it routes to BuildCollectionLambda which
+        // calls InvokeToList/InvokeToArray. Each element invoke then hits the dynamic detector
+        // for (srcElement, dstElement) and recurses naturally.
+        var tm = new TypeMap(pair.Source, pair.Destination, MemberList.None);
+        tm.IsDynamic = false;
+        tm.OriginatingProfile = null;
+        tm.RegistrationOrigin = "<dynamic-collection>";
+        // No property maps needed — collection routing doesn't use them.
+        TransformerResolver.Resolve(new[] { tm }, globalTransformers);
+        tm.Seal();
+        return tm;
     }
 
     private static TypeMap BuildDictToPocoTypeMap(

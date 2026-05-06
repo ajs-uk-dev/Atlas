@@ -21,6 +21,9 @@ internal sealed class MapperRegistry
 
     public StringToEnumCache StringToEnumCache { get; }
 
+    /// <summary>Convention options used during map materialization and codegen.</summary>
+    public ConventionOptions ConventionOptions => _conventionOptions;
+
     /// <summary>
     /// The application's root <see cref="IServiceProvider"/> when Atlas is registered through
     /// <c>Atlas.Extensions.DependencyInjection</c>; otherwise <c>null</c>. Used by
