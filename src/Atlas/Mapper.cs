@@ -19,7 +19,7 @@ internal sealed class Mapper : IMapper
     public MapperConfiguration ConfigurationProvider { get; }
 
     public TDestination Map<TSource, TDestination>(TSource source) =>
-        MappingInvoker.Invoke<TSource, TDestination>(_registry, source);
+        MappingInvoker.Invoke<TSource, TDestination>(_registry, source, null);
 
     public TDestination Map<TDestination>(object source)
     {
@@ -31,7 +31,7 @@ internal sealed class Mapper : IMapper
             .MakeGenericMethod(srcType, typeof(TDestination));
         try
         {
-            return (TDestination)method.Invoke(null, [_registry, source])!;
+            return (TDestination)method.Invoke(null, [_registry, source, null])!;
         }
         catch (TargetInvocationException tie) when (tie.InnerException is not null)
         {
@@ -41,5 +41,5 @@ internal sealed class Mapper : IMapper
     }
 
     public void Map<TSource, TDestination>(TSource source, TDestination destination) =>
-        MappingInvoker.InvokeUpdate(_registry, source, destination);
+        MappingInvoker.InvokeUpdate(_registry, source, null, destination);
 }

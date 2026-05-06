@@ -9,13 +9,13 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class MappingInvoker
 {
-    public static TDestination Invoke<TSource, TDestination>(MapperRegistry registry, TSource source)
+    public static TDestination Invoke<TSource, TDestination>(MapperRegistry registry, TSource source, MappingContext? ctx)
     {
         if (source is null) return default!;
 
         var pair = new TypePair(typeof(TSource), typeof(TDestination));
-        if (registry.TryGetDelegate(pair, out var cached) && cached is Func<TSource, TDestination> typed)
-            return typed(source);
+        if (registry.TryGetDelegate(pair, out var cached) && cached is Func<TSource, MappingContext?, TDestination> typed)
+            return typed(source, ctx);
 
         // If the user registered a map for this pair, use it (lazy compile). Registered maps always
         // win over the identity short-circuit so that, e.g., a Dictionary->Dictionary map produces
@@ -27,7 +27,7 @@ internal static class MappingInvoker
                 var typeMap = registry.GetTypeMap(p)!;
                 return ExecutionPlanBuilder.Build(typeMap, registry).Compile();
             });
-            return ((Func<TSource, TDestination>)del)(source);
+            return ((Func<TSource, MappingContext?, TDestination>)del)(source, ctx);
         }
 
         // No map registered. Identity short-circuit covers nested-call sites (typically primitives
@@ -40,15 +40,15 @@ internal static class MappingInvoker
             $"No map registered for {typeof(TSource).Name} -> {typeof(TDestination).Name}.");
     }
 
-    public static void InvokeUpdate<TSource, TDestination>(MapperRegistry registry, TSource source, TDestination destination)
+    public static void InvokeUpdate<TSource, TDestination>(MapperRegistry registry, TSource source, MappingContext? ctx, TDestination destination)
     {
         if (source is null) return;
         if (destination is null) throw new ArgumentNullException(nameof(destination));
 
         var pair = new TypePair(typeof(TSource), typeof(TDestination));
-        if (registry.TryGetUpdateDelegate(pair, out var cached) && cached is Action<TSource, TDestination> typed)
+        if (registry.TryGetUpdateDelegate(pair, out var cached) && cached is Action<TSource, MappingContext?, TDestination> typed)
         {
-            typed(source, destination);
+            typed(source, ctx, destination);
             return;
         }
 
@@ -60,10 +60,10 @@ internal static class MappingInvoker
             var lambda = ExecutionPlanBuilder.BuildUpdate(typeMap, registry);
             return lambda.Compile();
         });
-        ((Action<TSource, TDestination>)del)(source, destination);
+        ((Action<TSource, MappingContext?, TDestination>)del)(source, ctx, destination);
     }
 
-    public static List<TDestination> InvokeToList<TSource, TDestination>(MapperRegistry registry, IEnumerable<TSource>? source)
+    public static List<TDestination> InvokeToList<TSource, TDestination>(MapperRegistry registry, IEnumerable<TSource>? source, MappingContext? ctx)
     {
         if (source is null) return new List<TDestination>(0);
 
@@ -72,12 +72,12 @@ internal static class MappingInvoker
             : new List<TDestination>();
 
         foreach (var item in source)
-            list.Add(Invoke<TSource, TDestination>(registry, item));
+            list.Add(Invoke<TSource, TDestination>(registry, item, ctx));
 
         return list;
     }
 
-    public static TDestination[] InvokeToArray<TSource, TDestination>(MapperRegistry registry, IEnumerable<TSource>? source)
+    public static TDestination[] InvokeToArray<TSource, TDestination>(MapperRegistry registry, IEnumerable<TSource>? source, MappingContext? ctx)
     {
         if (source is null) return [];
 
@@ -86,19 +86,20 @@ internal static class MappingInvoker
             var arr = new TDestination[coll.Count];
             var i = 0;
             foreach (var item in source)
-                arr[i++] = Invoke<TSource, TDestination>(registry, item);
+                arr[i++] = Invoke<TSource, TDestination>(registry, item, ctx);
             return arr;
         }
 
         var list = new List<TDestination>();
         foreach (var item in source)
-            list.Add(Invoke<TSource, TDestination>(registry, item));
+            list.Add(Invoke<TSource, TDestination>(registry, item, ctx));
         return list.ToArray();
     }
 
     public static Dictionary<TKDest, TVDest> InvokeToDictionary<TKSrc, TVSrc, TKDest, TVDest>(
         MapperRegistry registry,
-        Dictionary<TKSrc, TVSrc>? source)
+        Dictionary<TKSrc, TVSrc>? source,
+        MappingContext? ctx)
         where TKSrc : notnull
         where TKDest : notnull
     {
@@ -106,8 +107,8 @@ internal static class MappingInvoker
         var dict = new Dictionary<TKDest, TVDest>(source.Count);
         foreach (var kv in source)
         {
-            var k = Invoke<TKSrc, TKDest>(registry, kv.Key);
-            var v = Invoke<TVSrc, TVDest>(registry, kv.Value);
+            var k = Invoke<TKSrc, TKDest>(registry, kv.Key, ctx);
+            var v = Invoke<TVSrc, TVDest>(registry, kv.Value, ctx);
             dict[k] = v;
         }
         return dict;
@@ -121,7 +122,7 @@ internal static class MappingInvoker
     /// Nested map dispatch goes through reflection on MappingInvoker.Invoke&lt;TSrc, TDest&gt; so
     /// no IMapper instance flows through the compiled lambda.
     /// </summary>
-    public static T? ConvertObjectTo<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    public static T? ConvertObjectTo<T>(object? value, MapperRegistry registry, MappingContext? ctx, string keyForDiagnostics)
     {
         if (value is null) return default;
 
@@ -145,7 +146,7 @@ internal static class MappingInvoker
             var invoke = typeof(MappingInvoker)
                 .GetMethod(nameof(Invoke))!
                 .MakeGenericMethod(typeof(IDictionary<string, object>), dstType);
-            return (T?)invoke.Invoke(null, new object?[] { registry, sub });
+            return (T?)invoke.Invoke(null, new object?[] { registry, sub, ctx });
         }
 
         // Registered (srcRuntimeType, dstType) TypeMap — dispatch via reflection on Invoke<srcType, T>
@@ -154,7 +155,7 @@ internal static class MappingInvoker
             var invoke = typeof(MappingInvoker)
                 .GetMethod(nameof(Invoke))!
                 .MakeGenericMethod(srcType, dstType);
-            return (T?)invoke.Invoke(null, new object?[] { registry, value });
+            return (T?)invoke.Invoke(null, new object?[] { registry, value, ctx });
         }
 
         throw new AtlasMappingException(
@@ -219,23 +220,23 @@ internal static class MappingInvoker
     }
 
     /// <summary>POCO collection materialization helper for dict→POCO codegen.</summary>
-    public static List<T>? ConvertObjectToList<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    public static List<T>? ConvertObjectToList<T>(object? value, MapperRegistry registry, MappingContext? ctx, string keyForDiagnostics)
     {
         if (value is null) return null;
         if (value is IEnumerable enumerable)
         {
             var list = new List<T>();
             foreach (var item in enumerable)
-                list.Add(ConvertObjectTo<T>(item, registry, keyForDiagnostics)!);
+                list.Add(ConvertObjectTo<T>(item, registry, ctx, keyForDiagnostics)!);
             return list;
         }
         throw new AtlasMappingException(
             $"Cannot convert value of type '{value.GetType()}' at key '{keyForDiagnostics}' to 'List<{typeof(T)}>'.");
     }
 
-    public static T[]? ConvertObjectToArray<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    public static T[]? ConvertObjectToArray<T>(object? value, MapperRegistry registry, MappingContext? ctx, string keyForDiagnostics)
     {
-        var list = ConvertObjectToList<T>(value, registry, keyForDiagnostics);
+        var list = ConvertObjectToList<T>(value, registry, ctx, keyForDiagnostics);
         return list?.ToArray();
     }
 
@@ -244,12 +245,12 @@ internal static class MappingInvoker
     /// through <see cref="SerializeValue"/> for POCOs). Returns null when <paramref name="src"/>
     /// is null. Used by POCO→dict codegen for List/array/IEnumerable properties (Task 8).
     /// </summary>
-    public static List<object?>? SerializeCollection<T>(IEnumerable<T>? src, MapperRegistry registry)
+    public static List<object?>? SerializeCollection<T>(IEnumerable<T>? src, MapperRegistry registry, MappingContext? ctx)
     {
         if (src is null) return null;
         var list = new List<object?>();
         foreach (var item in src)
-            list.Add(SerializeValue(item, typeof(T), registry));
+            list.Add(SerializeValue(item, typeof(T), registry, ctx));
         return list;
     }
 
@@ -262,12 +263,13 @@ internal static class MappingInvoker
     /// </summary>
     public static IDictionary<string, object?>? SerializeDictionary<TKey, TValue>(
         IDictionary<TKey, TValue>? src,
-        MapperRegistry registry) where TKey : notnull
+        MapperRegistry registry,
+        MappingContext? ctx) where TKey : notnull
     {
         if (src is null) return null;
         IDictionary<string, object?> dst = new ExpandoObject();
         foreach (var kv in src)
-            dst[kv.Key.ToString()!] = SerializeValue(kv.Value, typeof(TValue), registry);
+            dst[kv.Key.ToString()!] = SerializeValue(kv.Value, typeof(TValue), registry, ctx);
         return dst;
     }
 
@@ -276,7 +278,7 @@ internal static class MappingInvoker
     /// MappingInvoker.Invoke&lt;TDecl, ExpandoObject&gt; for nested POCOs (Atlas v2 #10).
     /// See docs/Atlas-Design-DynamicMapping.md §6.4.
     /// </summary>
-    public static object? SerializeValue(object? value, Type declaredType, MapperRegistry registry)
+    public static object? SerializeValue(object? value, Type declaredType, MapperRegistry registry, MappingContext? ctx)
     {
         if (value is null) return null;
 
@@ -289,7 +291,7 @@ internal static class MappingInvoker
         var invoke = typeof(MappingInvoker)
             .GetMethod(nameof(Invoke))!
             .MakeGenericMethod(declaredType, typeof(ExpandoObject));
-        return invoke.Invoke(null, new object?[] { registry, value });
+        return invoke.Invoke(null, new object?[] { registry, value, ctx });
     }
 
     private static bool IsPrimitiveOrString(Type t)
