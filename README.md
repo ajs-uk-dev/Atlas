@@ -421,7 +421,7 @@ Behavior summary:
 - Enums emit as underlying integer; read via `Convert.ChangeType`.
 - `Atlas.Projections` rejects dynamic-shape mappings (LINQ providers can't translate
   arbitrary key lookups).
-- Self-pair round-trips (`ExpandoObject → ExpandoObject`, etc.) require an explicit `CreateMap` registration.
+- Self-pair round-trips (`ExpandoObject → ExpandoObject`, `Dictionary<string, object> → Dictionary<string, object>`, etc.) are not supported by the convention-only path; explicit `CreateMap` registration of dynamic-shape pairs is a known v1 limitation (see `docs/Atlas-Design-DynamicMapping.md` §7.5). For dict-to-dict copy semantics, iterate manually.
 - Profile-scoped value transformers do NOT fire on dynamic TypeMaps; only global-scope transformers compose.
 
 See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
