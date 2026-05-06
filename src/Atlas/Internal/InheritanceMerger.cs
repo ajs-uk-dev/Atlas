@@ -40,6 +40,10 @@ internal static class InheritanceMerger
             // else: derived is explicit — keep it as-is.
         }
 
+        // TypeMap-level flag merge (OR semantics: once set, stays set).
+        if (baseTm.PreserveReferences)
+            derivedTm.PreserveReferences = true;
+
         // Hook merge.
         // BeforeHooks: prepend base's hooks so they run FIRST at runtime (base-first).
         if (baseTm.BeforeHooks.Count > 0)

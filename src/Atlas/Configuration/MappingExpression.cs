@@ -151,6 +151,7 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
             ReverseMapPair = TypeMap.Pair,
             RegistrationOrigin = $"CreateMap<{typeof(TSource).Name}, {typeof(TDestination).Name}>().ReverseMap()",
             OriginatingProfile = TypeMap.OriginatingProfile,
+            PreserveReferences = TypeMap.PreserveReferences,
         };
         _sink(reverseTm);
 

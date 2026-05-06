@@ -12,6 +12,7 @@ internal sealed class OpenGenericTypeMap
     public MemberList MemberList { get; }
     public string RegistrationOrigin { get; }
     public MapperProfile? OriginatingProfile { get; }
+    public bool PreserveReferences { get; set; }
 
     public OpenGenericTypeMap(
         Type sourceTypeDefinition,

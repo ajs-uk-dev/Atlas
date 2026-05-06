@@ -150,7 +150,8 @@ internal sealed class MapperRegistry
         {
             OriginatingProfile = template.OriginatingProfile,
             RegistrationOrigin = $"{template.RegistrationOrigin} " +
-                                 $"(closed at runtime as ({closedPair.Source.Name}, {closedPair.Destination.Name}))"
+                                 $"(closed at runtime as ({closedPair.Source.Name}, {closedPair.Destination.Name}))",
+            PreserveReferences = template.PreserveReferences,
         };
 
         // HasRegisteredMap probe — the convention engine uses this to decide whether to
