@@ -21,6 +21,9 @@ internal sealed class MapperRegistry
 
     public StringToEnumCache StringToEnumCache { get; }
 
+    /// <summary>Convention options used during map materialization and codegen.</summary>
+    public ConventionOptions ConventionOptions => _conventionOptions;
+
     /// <summary>
     /// The application's root <see cref="IServiceProvider"/> when Atlas is registered through
     /// <c>Atlas.Extensions.DependencyInjection</c>; otherwise <c>null</c>. Used by
@@ -59,18 +62,25 @@ internal sealed class MapperRegistry
         // Hot path: exact closed-pair match. ConcurrentDictionary read is lock-free.
         if (_typeMaps.TryGetValue(pair, out var m)) return m;
 
-        // Fast bail when no open-generic registrations exist — hot-path zero-cost
-        // for users who don't use the feature.
-        if (_openGenericMaps.Count == 0) return null;
+        // Stage 2: open-generic template scan.
+        if (_openGenericMaps.Count > 0)
+        {
+            var template = FindMatchingOpenGenericTemplate(pair);
+            if (template is not null)
+            {
+                // Materialize the closed pair via GetOrAdd. Under contention, the factory may
+                // run more than once but only one TypeMap is stored — materialization is
+                // idempotent (deterministic given the same pair + template + convention options).
+                return _typeMaps.GetOrAdd(pair, p => MaterializeClosed(template, p));
+            }
+        }
 
-        // Closed-pair miss. Search open-generic registrations.
-        var template = FindMatchingOpenGenericTemplate(pair);
-        if (template is null) return null;
+        // Stage 3: dynamic-shape detector (Atlas v2 #10 — see docs/Atlas-Design-DynamicMapping.md §2.1)
+        if (DynamicShape.IsDynamicPair(pair))
+            return _typeMaps.GetOrAdd(pair, _ =>
+                DynamicShape.MaterializeTypeMap(pair, _globalTransformers, _conventionOptions));
 
-        // Materialize the closed pair via GetOrAdd. Under contention, the factory may
-        // run more than once but only one TypeMap is stored — materialization is
-        // idempotent (deterministic given the same pair + template + convention options).
-        return _typeMaps.GetOrAdd(pair, p => MaterializeClosed(template, p));
+        return null;
     }
 
     public IReadOnlyCollection<TypeMap> AllTypeMaps => (IReadOnlyCollection<TypeMap>)_typeMaps.Values;

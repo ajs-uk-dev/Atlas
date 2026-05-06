@@ -12,6 +12,12 @@ internal static class ProjectionCompatibility
 {
     public static bool IsTypeMapProjectable(TypeMap tm, out string? reason)
     {
+        if (tm.IsDynamic)
+        {
+            reason = $"map is a dynamic-shape mapping ({tm.SourceType} → {tm.DestinationType}); LINQ providers cannot translate runtime dictionary key lookups against arbitrary keys. Use mapper.Map<>() instead.";
+            return false;
+        }
+
         if (tm.CustomConverter is not null)
         {
             reason = "ConvertUsing(...) — delegate-form converter is in-memory only.";

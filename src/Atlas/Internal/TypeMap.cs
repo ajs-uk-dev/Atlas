@@ -106,6 +106,13 @@ internal sealed class TypeMap
     /// </summary>
     public MapperProfile? OriginatingProfile { get; set; }
 
+    /// <summary>
+    /// True for lazily-materialized dynamic TypeMaps (Atlas v2 #10 — see DynamicShape).
+    /// Causes ExecutionPlanBuilder to dispatch to DynamicPlanBuilder, ConfigurationValidator
+    /// to skip, and Atlas.Projections to reject this TypeMap.
+    /// </summary>
+    public bool IsDynamic { get; set; }
+
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
 

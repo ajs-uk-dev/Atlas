@@ -1,3 +1,6 @@
+using System.Collections;
+using System.Dynamic;
+
 namespace Atlas.Internal;
 
 /// <summary>
@@ -109,4 +112,193 @@ internal static class MappingInvoker
         }
         return dict;
     }
+
+    /// <summary>
+    /// Per-key value coercion helper for dict→POCO codegen (Atlas v2 #10).
+    /// Tries identity → numeric/IConvertible widening → string parsing (Guid/DateTime/TimeSpan/enum)
+    /// → recursive dict→POCO → registered TypeMap (srcRuntimeType, dstType).
+    /// Throws AtlasMappingException with diagnostic info when no path applies.
+    /// Nested map dispatch goes through reflection on MappingInvoker.Invoke&lt;TSrc, TDest&gt; so
+    /// no IMapper instance flows through the compiled lambda.
+    /// </summary>
+    public static T? ConvertObjectTo<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        if (value is null) return default;
+
+        var dstType = typeof(T);
+
+        if (value is T direct) return direct;
+
+        var srcType = value.GetType();
+
+        // Numeric / IConvertible widening
+        if (TryNumericOrConvertible(value, srcType, dstType, out var numericConverted))
+            return (T?)numericConverted;
+
+        // String parsing for Guid / DateTime / TimeSpan / enum / numeric-from-string
+        if (value is string s && TryParseString(s, dstType, out var parsed))
+            return (T?)parsed;
+
+        // Recursive dict→POCO via reflection on MappingInvoker.Invoke<IDictionary<string, object>, T>
+        if (value is IDictionary<string, object> sub && DynamicShape.IsPocoLike(dstType))
+        {
+            var invoke = typeof(MappingInvoker)
+                .GetMethod(nameof(Invoke))!
+                .MakeGenericMethod(typeof(IDictionary<string, object>), dstType);
+            return (T?)invoke.Invoke(null, new object?[] { registry, sub });
+        }
+
+        // Registered (srcRuntimeType, dstType) TypeMap — dispatch via reflection on Invoke<srcType, T>
+        if (registry.GetTypeMap(new TypePair(srcType, dstType)) is not null)
+        {
+            var invoke = typeof(MappingInvoker)
+                .GetMethod(nameof(Invoke))!
+                .MakeGenericMethod(srcType, dstType);
+            return (T?)invoke.Invoke(null, new object?[] { registry, value });
+        }
+
+        throw new AtlasMappingException(
+            $"Cannot convert value of type '{srcType}' at key '{keyForDiagnostics}' to '{dstType}'.");
+    }
+
+    private static bool TryNumericOrConvertible(object value, Type srcType, Type dstType, out object? converted)
+    {
+        var underlyingDst = Nullable.GetUnderlyingType(dstType) ?? dstType;
+        if (underlyingDst.IsPrimitive || underlyingDst == typeof(decimal) || underlyingDst == typeof(string))
+        {
+            try
+            {
+                converted = Convert.ChangeType(value, underlyingDst);
+                return true;
+            }
+            catch { converted = null; return false; }
+        }
+        converted = null;
+        return false;
+    }
+
+    private static bool TryParseString(string s, Type dstType, out object? parsed)
+    {
+        var underlyingDst = Nullable.GetUnderlyingType(dstType) ?? dstType;
+        if (underlyingDst == typeof(Guid)) { if (Guid.TryParse(s, out var g)) { parsed = g; return true; } }
+        if (underlyingDst == typeof(DateTime)) { if (DateTime.TryParse(s, out var d)) { parsed = d; return true; } }
+        if (underlyingDst == typeof(DateTimeOffset)) { if (DateTimeOffset.TryParse(s, out var dt)) { parsed = dt; return true; } }
+        if (underlyingDst == typeof(TimeSpan)) { if (TimeSpan.TryParse(s, out var t)) { parsed = t; return true; } }
+        if (underlyingDst.IsEnum) { if (Enum.TryParse(underlyingDst, s, ignoreCase: true, out var e)) { parsed = e; return true; } }
+        if (underlyingDst.IsPrimitive || underlyingDst == typeof(decimal))
+        {
+            try { parsed = Convert.ChangeType(s, underlyingDst); return true; } catch { /* fall through */ }
+        }
+        parsed = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Dot-notation fallback: scans <paramref name="src"/> for keys starting with
+    /// <paramref name="prefix"/>, strips the prefix, and returns a synthesized nested dict.
+    /// Returns null when no matching keys exist. See docs/Atlas-Design-DynamicMapping.md §5.4.
+    /// </summary>
+    public static IDictionary<string, object>? ScanPrefix(
+        IDictionary<string, object> src,
+        string prefix,
+        StringComparison cmp)
+    {
+        Dictionary<string, object>? result = null;
+        var resultComparer = cmp == StringComparison.OrdinalIgnoreCase
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        foreach (var kv in src)
+        {
+            if (kv.Key.StartsWith(prefix, cmp))
+            {
+                result ??= new Dictionary<string, object>(resultComparer);
+                result[kv.Key.Substring(prefix.Length)] = kv.Value;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>POCO collection materialization helper for dict→POCO codegen.</summary>
+    public static List<T>? ConvertObjectToList<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        if (value is null) return null;
+        if (value is IEnumerable enumerable)
+        {
+            var list = new List<T>();
+            foreach (var item in enumerable)
+                list.Add(ConvertObjectTo<T>(item, registry, keyForDiagnostics)!);
+            return list;
+        }
+        throw new AtlasMappingException(
+            $"Cannot convert value of type '{value.GetType()}' at key '{keyForDiagnostics}' to 'List<{typeof(T)}>'.");
+    }
+
+    public static T[]? ConvertObjectToArray<T>(object? value, MapperRegistry registry, string keyForDiagnostics)
+    {
+        var list = ConvertObjectToList<T>(value, registry, keyForDiagnostics);
+        return list?.ToArray();
+    }
+
+    /// <summary>
+    /// Serializes each element of a collection to <c>object?</c> (boxes primitives, recurses
+    /// through <see cref="SerializeValue"/> for POCOs). Returns null when <paramref name="src"/>
+    /// is null. Used by POCO→dict codegen for List/array/IEnumerable properties (Task 8).
+    /// </summary>
+    public static List<object?>? SerializeCollection<T>(IEnumerable<T>? src, MapperRegistry registry)
+    {
+        if (src is null) return null;
+        var list = new List<object?>();
+        foreach (var item in src)
+            list.Add(SerializeValue(item, typeof(T), registry));
+        return list;
+    }
+
+    /// <summary>
+    /// Serializes a typed dictionary to an <see cref="ExpandoObject"/> (returned as
+    /// <c>IDictionary&lt;string, object?&gt;</c>) with keys stringified via <c>ToString()</c>
+    /// and values recursed through <see cref="SerializeValue"/>. Returns null when
+    /// <paramref name="src"/> is null. Used by POCO→dict codegen for Dictionary&lt;TKey, TValue&gt;
+    /// properties (Task 8).
+    /// </summary>
+    public static IDictionary<string, object?>? SerializeDictionary<TKey, TValue>(
+        IDictionary<TKey, TValue>? src,
+        MapperRegistry registry) where TKey : notnull
+    {
+        if (src is null) return null;
+        IDictionary<string, object?> dst = new ExpandoObject();
+        foreach (var kv in src)
+            dst[kv.Key.ToString()!] = SerializeValue(kv.Value, typeof(TValue), registry);
+        return dst;
+    }
+
+    /// <summary>
+    /// POCO→dict per-property emit helper. Boxes primitives, recurses through
+    /// MappingInvoker.Invoke&lt;TDecl, ExpandoObject&gt; for nested POCOs (Atlas v2 #10).
+    /// See docs/Atlas-Design-DynamicMapping.md §6.4.
+    /// </summary>
+    public static object? SerializeValue(object? value, Type declaredType, MapperRegistry registry)
+    {
+        if (value is null) return null;
+
+        var underlying = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
+
+        if (IsPrimitiveOrString(underlying)) return value;
+        if (underlying.IsEnum) return Convert.ChangeType(value, Enum.GetUnderlyingType(underlying));
+
+        // Nested POCO: recurse via MappingInvoker.Invoke<declaredType, ExpandoObject>
+        var invoke = typeof(MappingInvoker)
+            .GetMethod(nameof(Invoke))!
+            .MakeGenericMethod(declaredType, typeof(ExpandoObject));
+        return invoke.Invoke(null, new object?[] { registry, value });
+    }
+
+    private static bool IsPrimitiveOrString(Type t)
+        => t.IsPrimitive
+        || t == typeof(string)
+        || t == typeof(decimal)
+        || t == typeof(Guid)
+        || t == typeof(DateTime)
+        || t == typeof(DateTimeOffset)
+        || t == typeof(TimeSpan)
+        || t == typeof(byte[]);
 }

@@ -379,6 +379,53 @@ registry.
 materialization on first call and reuses the cached closed `TypeMap` for subsequent
 projections.
 
+## Dynamic / dictionary mapping
+
+Atlas maps between strongly-typed POCOs and three recognized dynamic shapes
+without any registration:
+
+- `IDictionary<string, object>`
+- `ExpandoObject`
+- `Dictionary<string, object>`
+
+Use cases: JSON documents, MongoDB BSON, configuration-shaped inputs.
+
+```csharp
+// Reading: dict → POCO
+var dict = new Dictionary<string, object>
+{
+    ["OrderId"] = 42L,                              // long → int via NumericConversions
+    ["CustomerName"] = "Alice",
+    ["Customer.Email"] = "alice@example.com",       // dot-notation populates nested
+    ["Lines"] = new[] { new Dictionary<string, object> { ["Sku"] = "X" } }
+};
+var order = mapper.Map<OrderDto>(dict);             // no CreateMap needed
+
+// Writing: POCO → dict (any of the three shapes)
+ExpandoObject e = mapper.Map<ExpandoObject>(order);
+Dictionary<string, object> d = mapper.Map<Dictionary<string, object>>(order);
+
+// dynamic-friendly output
+dynamic json = mapper.Map<ExpandoObject>(order);
+var name = json.CustomerName;
+```
+
+Behavior summary:
+
+- Convention-only — no `CreateMap` registration.
+- Honors the configuration's case-sensitivity setting for both top-level key match and dot-notation prefix scan.
+- Missing keys leave the destination at `default(T)` for fresh `Map`; preserve existing for update-in-place `Map(src, existing)`.
+- Excess dict keys silently ignored.
+- Nested POCOs read from nested-dict values OR from dot-notation keys (`"Customer.Email"`); top-level wins.
+- Nested POCOs emit as nested `ExpandoObject` regardless of outer destination shape.
+- Enums emit as underlying integer; read via `Convert.ChangeType`.
+- `Atlas.Projections` rejects dynamic-shape mappings (LINQ providers can't translate
+  arbitrary key lookups).
+- Self-pair round-trips (`ExpandoObject → ExpandoObject`, `Dictionary<string, object> → Dictionary<string, object>`, etc.) are not supported by the convention-only path; explicit `CreateMap` registration of dynamic-shape pairs is a known v1 limitation (see `docs/Atlas-Design-DynamicMapping.md` §7.5). For dict-to-dict copy semantics, iterate manually.
+- Profile-scoped value transformers do NOT fire on dynamic TypeMaps; only global-scope transformers compose.
+
+See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
+
 ## What's in v1
 
 | Feature | Notes |
@@ -402,7 +449,6 @@ projections.
 
 Each of these has its own design doc to be written separately:
 
-- Dynamic / dictionary-shaped sources
 - Reference handling (cycle detection)
 - Attribute-based configuration
 - Expression translation (`UseAsDataSource`)

@@ -11,6 +11,11 @@ internal static class ExecutionPlanBuilder
 {
     public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
     {
+        // Dynamic dispatch (Atlas v2 #10) — must be first so dict↔POCO pairs are never
+        // intercepted by the enum or POCO branches below.
+        if (typeMap.IsDynamic)
+            return DynamicPlanBuilder.Build(typeMap, registry);
+
         // Enum dispatch — both source AND destination must be enums (sealed value types,
         // so this branch is mutually exclusive with inheritance dispatch below).
         if (typeMap.SourceType.IsEnum && typeMap.DestinationType.IsEnum)
@@ -135,6 +140,10 @@ internal static class ExecutionPlanBuilder
     /// <summary>Build the update-in-place lambda for the given type map.</summary>
     public static LambdaExpression BuildUpdate(TypeMap typeMap, MapperRegistry registry)
     {
+        // Dynamic dispatch (Atlas v2 #10) — mirrors the Build() IsDynamic branch for update direction.
+        if (typeMap.IsDynamic)
+            return DynamicPlanBuilder.BuildUpdate(typeMap, registry);
+
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
         var destParam = Expression.Parameter(typeMap.DestinationType, "dest");
 

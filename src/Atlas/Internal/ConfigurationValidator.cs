@@ -18,6 +18,8 @@ internal static class ConfigurationValidator
         var errors = new List<ConfigurationError>();
         foreach (var tm in registry.AllTypeMaps)
         {
+            if (tm.IsDynamic) continue;     // Atlas v2 #10 — dynamic TypeMaps are convention-only
+
             // Enum rules (always-on; covers per-value overrides, fallback, foot-gun guard).
             ValidateEnum(tm, errors);
 
