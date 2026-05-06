@@ -303,6 +303,23 @@ public class MapperDictToPocoTests
         Assert.Equal("preserved", existing.Customer!.Name);
     }
 
+    [Fact]
+    public void Map_UpdateInPlace_NestedPocoPresent_PreservesUnreferencedSiblingFields()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var existing = new OrderWithEmailCustomerPoco
+        {
+            Customer = new CustomerWithEmailPoco { Name = "old", Email = "old@x" }
+        };
+        var dict = new Dictionary<string, object>
+        {
+            ["Customer"] = new Dictionary<string, object> { ["Name"] = "new" }
+        };
+        mapper.Map(dict, existing);
+        Assert.Equal("new", existing.Customer!.Name);
+        Assert.Equal("old@x", existing.Customer!.Email);  // NOT overwritten
+    }
+
     private sealed class SimplePoco
     {
         public int Id { get; set; }
@@ -313,6 +330,15 @@ public class MapperDictToPocoTests
     private sealed class NullableIntPoco { public int? MaybeAge { get; set; } }
     private sealed class CustomerPoco { public string? Name { get; set; } }
     private sealed class OrderPoco { public CustomerPoco? Customer { get; set; } }
+    private sealed class CustomerWithEmailPoco
+    {
+        public string? Name { get; set; }
+        public string? Email { get; set; }
+    }
+    private sealed class OrderWithEmailCustomerPoco
+    {
+        public CustomerWithEmailPoco? Customer { get; set; }
+    }
     private sealed class AddressPoco { public string? City { get; set; } }
     private sealed class DeepCustomerPoco { public AddressPoco? Address { get; set; } }
     private sealed class DeepOrderPoco { public DeepCustomerPoco? Customer { get; set; } }

@@ -20,6 +20,8 @@ internal static class DynamicPlanBuilder
         .GetMethod(nameof(MappingInvoker.ConvertObjectToArray), BindingFlags.Public | BindingFlags.Static)!;
     private static readonly MethodInfo _invokeMethod = typeof(MappingInvoker)
         .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!;
+    private static readonly MethodInfo _invokeUpdateMethod = typeof(MappingInvoker)
+        .GetMethod(nameof(MappingInvoker.InvokeUpdate), BindingFlags.Public | BindingFlags.Static)!;
     private static readonly MethodInfo _scanPrefix = typeof(MappingInvoker)
         .GetMethod(nameof(MappingInvoker.ScanPrefix), BindingFlags.Public | BindingFlags.Static)!;
     private static readonly ConstructorInfo _atlasMappingExceptionCtor =
@@ -349,12 +351,22 @@ internal static class DynamicPlanBuilder
 
     /// <summary>
     /// Emits the nested-POCO assignment block with three sub-paths:
-    /// 1. Top-level key is a nested dict   → recursive Invoke
+    /// 1. Top-level key is a nested dict   → recursive Invoke (create) or InvokeUpdate (update-in-place)
     /// 2. Top-level key is already the POCO type → direct assign (Assert.Same)
-    /// 3. No top-level key, but dot-notation prefixed keys exist → ScanPrefix + recursive Invoke
+    /// 3. No top-level key, but dot-notation prefixed keys exist → ScanPrefix + recursive Invoke/InvokeUpdate
     ///
-    /// When <paramref name="updateInPlace"/> is true, the else branch (TryGetValue miss with no
-    /// dot-notation match) is absent — existing destination value is preserved.
+    /// When <paramref name="updateInPlace"/> is true and the property type has a parameterless
+    /// constructor, the dict branch calls <see cref="MappingInvoker.InvokeUpdate{TSource,TDestination}"/>
+    /// (merge semantics: existing sibling fields are preserved). If the property type has no
+    /// parameterless ctor, it falls back to <see cref="MappingInvoker.Invoke{TSource,TDestination}"/>
+    /// (overwrite). The ScanPrefix fallback branch follows the same logic.
+    ///
+    /// When <paramref name="updateInPlace"/> is false, both the dict branch and the ScanPrefix
+    /// branch always use <see cref="MappingInvoker.Invoke{TSource,TDestination}"/> (create-new semantics).
+    ///
+    /// The else branch (TryGetValue miss with no dot-notation match) is always wired up; under
+    /// update-in-place the ScanPrefix IfThen has no else, so a complete miss leaves the existing
+    /// destination value untouched.
     /// </summary>
     private static Expression EmitNestedPocoAssign(
         string keyStr,
@@ -372,13 +384,16 @@ internal static class DynamicPlanBuilder
         // Closed Invoke<IDictionary<string, object>, TProp>
         var closedInvoke = _invokeMethod.MakeGenericMethod(_dictType, propType);
 
+        // Whether the property type supports merge semantics (has a parameterless ctor).
+        var hasCtor = propType.GetConstructor(Type.EmptyTypes) is not null;
+
         // Nested dict variable for the scan-prefix fallback
         var prefixStr = keyStr + ".";
         var prefixExpr = Expression.Constant(prefixStr, typeof(string));
         var nestedDictVar = Expression.Variable(_dictType, "nd_" + keyStr);
 
         // Branch A (inside TryGetValue hit):
-        //   if (valueVar is IDictionary<string, object> nd) dst.Prop = Invoke<dict, TProp>(registry, nd)
+        //   if (valueVar is IDictionary<string, object> nd) dst.Prop = Invoke/InvokeUpdate(registry, nd, ...)
         //   else if (valueVar is TProp typed)              dst.Prop = typed
         //   else if (valueVar is null)                     dst.Prop = null / default
         //   else throw AtlasMappingException
@@ -388,23 +403,35 @@ internal static class DynamicPlanBuilder
         // null-assign: dst.Prop = default(TProp)  (null for reference types)
         var nullAssign = Expression.Assign(dstPropExpr, Expression.Default(propType));
 
-        // dict branch: dst.Prop = Invoke(registry, (IDictionary<string,object>)valueVar)
-        var dictBranchAssign = Expression.Assign(dstPropExpr,
-            Expression.Call(closedInvoke, registryConst, nestedDictCastVar));
+        // dict branch: create path (non-update) → dst.Prop = Invoke(registry, nestedDict)
+        // dict branch: update path with ctor   → dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, dst.Prop)
+        // dict branch: update path without ctor → dst.Prop = Invoke(registry, nestedDict)  [fallback: overwrite]
+        Expression dictBranchBody;
+        if (updateInPlace && hasCtor)
+        {
+            // dst.Prop ??= new TPropType();
+            // InvokeUpdate<IDictionary<string,object>, TPropType>(registry, nestedDictCastVar, dst.Prop)
+            var closedInvokeUpdate = _invokeUpdateMethod.MakeGenericMethod(_dictType, propType);
+            dictBranchBody = Expression.Block(
+                Expression.IfThen(
+                    Expression.Equal(dstPropExpr, Expression.Constant(null, propType)),
+                    Expression.Assign(dstPropExpr, Expression.New(propType))),
+                Expression.Call(closedInvokeUpdate, registryConst, nestedDictCastVar, dstPropExpr));
+        }
+        else
+        {
+            dictBranchBody = Expression.Assign(dstPropExpr,
+                Expression.Call(closedInvoke, registryConst, nestedDictCastVar));
+        }
 
         // typed branch: dst.Prop = (TProp)valueVar
         var typedBranchAssign = Expression.Assign(dstPropExpr, typedVar);
 
-        // throw branch
+        // throw branch (I-2: use cached ctor; I-3: compile-time constant message)
         var throwExpr = Expression.Throw(
             Expression.New(
-                typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!,
-                Expression.Call(
-                    typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string), typeof(string), typeof(string) })!,
-                    Expression.Constant($"Cannot convert value at key '"),
-                    keyExpr,
-                    Expression.Constant("' to '"),
-                    Expression.Constant(propType.Name + "'."))));
+                _atlasMappingExceptionCtor,
+                Expression.Constant($"Cannot convert value at key '{keyStr}' to '{propType.Name}'.")));
 
         // Build the if-else chain for when TryGetValue hits
         var ifNullBranch = Expression.IfThenElse(
@@ -425,34 +452,37 @@ internal static class DynamicPlanBuilder
             Expression.Block(
                 new[] { nestedDictCastVar },
                 Expression.Assign(nestedDictCastVar, Expression.Convert(valueVar, _dictType)),
-                dictBranchAssign),
+                dictBranchBody),
             ifTypedBranch);
 
         // Else branch (TryGetValue missed): ScanPrefix dot-notation fallback
         //   var nestedDict = ScanPrefix(src, "Prop.", cmp);
-        //   if (nestedDict != null) dst.Prop = Invoke(registry, nestedDict);
-        //
-        // Under update-in-place: no else branch at all — missing key preserves existing value.
+        //   if (nestedDict != null)
+        //     update path with ctor:    dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, dst.Prop)
+        //     otherwise:                dst.Prop = Invoke(registry, nestedDict)
         var scanCall = Expression.Call(_scanPrefix, srcAsDict, prefixExpr, cmpConst);
-        var assignScanned = Expression.Assign(dstPropExpr,
-            Expression.Call(closedInvoke, registryConst, nestedDictVar));
+        Expression scanFoundBody;
+        if (updateInPlace && hasCtor)
+        {
+            var closedInvokeUpdate = _invokeUpdateMethod.MakeGenericMethod(_dictType, propType);
+            scanFoundBody = Expression.Block(
+                Expression.IfThen(
+                    Expression.Equal(dstPropExpr, Expression.Constant(null, propType)),
+                    Expression.Assign(dstPropExpr, Expression.New(propType))),
+                Expression.Call(closedInvokeUpdate, registryConst, nestedDictVar, dstPropExpr));
+        }
+        else
+        {
+            scanFoundBody = Expression.Assign(dstPropExpr,
+                Expression.Call(closedInvoke, registryConst, nestedDictVar));
+        }
+
         var elseBranch = Expression.Block(
             new[] { nestedDictVar },
             Expression.Assign(nestedDictVar, scanCall),
             Expression.IfThen(
                 Expression.NotEqual(nestedDictVar, Expression.Constant(null, _dictType)),
-                assignScanned));
-
-        if (updateInPlace)
-        {
-            // Under update-in-place: only do anything if TryGetValue hits OR dot-notation found.
-            // TryGetValue hit → full ifDictBranch (replaces nested).
-            // Miss → check dot-notation, but only assign if found (IfThen without else).
-            return Expression.Block(
-                new[] { valueVar, hasValue },
-                Expression.Assign(hasValue, Expression.Call(srcAsDict, tryGetValue, keyExpr, valueVar)),
-                Expression.IfThenElse(hasValue, ifDictBranch, elseBranch));
-        }
+                scanFoundBody));
 
         return Expression.Block(
             new[] { valueVar, hasValue },
