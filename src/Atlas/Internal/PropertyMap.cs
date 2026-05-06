@@ -65,6 +65,13 @@ internal sealed class PropertyMap
     /// </summary>
     public LambdaExpression? NullSubstitute { get; set; }
 
+    /// <summary>
+    /// Non-null iff this PropertyMap belongs to a dynamic TypeMap (TypeMap.IsDynamic == true).
+    /// The value is the dictionary key under which to read (dict→POCO direction) or write
+    /// (POCO→dict direction). See docs/Atlas-Design-DynamicMapping.md §4.2.
+    /// </summary>
+    public string? DynamicKey { get; set; }
+
     public bool IsResolved => Ignored || HasConstant || CustomExpression is not null || SourcePath is not null;
 
     private PropertyMap(string name, Type destinationType, PropertyInfo? prop, ParameterInfo? ctorParam)
@@ -97,6 +104,31 @@ internal sealed class PropertyMap
         var pm = new PropertyMap(string.Join('.', path.Select(p => p.Name)),
                                  leaf.PropertyType, leaf, null);
         pm.DestinationPath = path;
+        return pm;
+    }
+
+    /// <summary>
+    /// Factory for synthesized PropertyMaps in dict→POCO direction of a dynamic TypeMap.
+    /// The PropertyMap targets a writable POCO destination property and reads its value
+    /// from <paramref name="dynamicKey"/> in the source IDictionary&lt;string, object&gt;.
+    /// </summary>
+    internal static PropertyMap ForDictKey(PropertyInfo destinationMember, string dynamicKey)
+    {
+        var pm = ForProperty(destinationMember);
+        pm.DynamicKey = dynamicKey;
+        return pm;
+    }
+
+    /// <summary>
+    /// Factory for synthesized PropertyMaps in POCO→dict direction of a dynamic TypeMap.
+    /// The PropertyMap reads its value from a readable POCO source property and writes
+    /// to <paramref name="dynamicKey"/> in the destination IDictionary&lt;string, object&gt;.
+    /// </summary>
+    internal static PropertyMap ForPocoSource(PropertyInfo sourceMember, string dynamicKey)
+    {
+        var pm = new PropertyMap(dynamicKey, sourceMember.PropertyType, null, null);
+        pm.SourcePath = new SourceMemberPath(new[] { sourceMember });
+        pm.DynamicKey = dynamicKey;
         return pm;
     }
 }
