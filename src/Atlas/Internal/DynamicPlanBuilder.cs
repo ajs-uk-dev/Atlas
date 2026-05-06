@@ -35,7 +35,6 @@ internal static class DynamicPlanBuilder
         .GetMethod(nameof(MappingInvoker.SerializeDictionary), BindingFlags.Public | BindingFlags.Static)!;
 
     private static readonly Type _dictType = typeof(IDictionary<string, object>);
-    private static readonly Type _dictOpenGeneric = typeof(Dictionary<,>);
 
     public static LambdaExpression Build(TypeMap typeMap, MapperRegistry registry)
     {
@@ -329,8 +328,17 @@ internal static class DynamicPlanBuilder
         // Return type must be void for update lambdas; add Expression.Empty() as last stmt.
         body.Add(Expression.Empty());
 
-        var block = Expression.Block(new[] { dstAsDict }, body);
-        return Expression.Lambda(block, srcParam, dstParam);
+        Expression blockExpr = Expression.Block(new[] { dstAsDict }, body);
+
+        // Null-guard: only execute body if src is not null (symmetry with BuildDictToPocoUpdateLambda).
+        if (typeMap.SourceType.IsClass)
+        {
+            blockExpr = Expression.IfThen(
+                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType))),
+                blockExpr);
+        }
+
+        return Expression.Lambda(blockExpr, srcParam, dstParam);
     }
 
     /// <summary>
@@ -656,7 +664,14 @@ internal static class DynamicPlanBuilder
             return Expression.Convert(call, typeof(object));
         }
 
-        // 3. Scalar / enum / nested POCO / string — existing Task 7 SerializeValue path.
+        // 3. Dynamic shape (Dictionary<string, object>, IDictionary<string, object>, ExpandoObject):
+        //    pass through as-is — store the source instance directly under the destination key.
+        if (DynamicShape.IsDynamicShape(srcMemberType))
+        {
+            return Expression.Convert(memberAccess, typeof(object));
+        }
+
+        // 4. Scalar / enum / nested POCO / string — existing Task 7 SerializeValue path.
         var boxed = Expression.Convert(memberAccess, typeof(object));
         return Expression.Call(_serializeValue, boxed,
             Expression.Constant(srcMemberType, typeof(Type)), registryConst);

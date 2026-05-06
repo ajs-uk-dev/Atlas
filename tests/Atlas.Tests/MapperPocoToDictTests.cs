@@ -207,6 +207,33 @@ public class MapperPocoToDictTests
         Assert.Equal("alice", roundTripped.Name);
     }
 
+    [Fact]
+    public void Map_PocoWithDictionaryStringObjectProperty_PassesThrough()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var bag = new Dictionary<string, object> { ["k"] = "v", ["n"] = 42 };
+        var p = new WithDictBagPoco { Bag = bag };
+        var d = mapper.Map<ExpandoObject>(p);
+        var dict = (IDictionary<string, object?>)d;
+        Assert.True(dict.ContainsKey("Bag"));
+        var nestedBag = dict["Bag"];
+        Assert.NotNull(nestedBag);
+        // Pass-through semantics — the source dict instance is stored directly.
+        Assert.Same(bag, nestedBag);
+    }
+
+    [Fact]
+    public void Map_PocoWithExpandoObjectProperty_PassesThrough()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        dynamic e = new ExpandoObject();
+        e.k = "v";
+        var p = new WithExpandoPoco { Expando = (ExpandoObject)e };
+        var d = mapper.Map<Dictionary<string, object>>(p);
+        Assert.True(d.ContainsKey("Expando"));
+        Assert.Same((object)e, d["Expando"]);
+    }
+
     private sealed class SimplePoco
     {
         public int Id { get; set; }
@@ -230,4 +257,6 @@ public class MapperPocoToDictTests
         public ReadOnlyPropPoco(string name) { Name = name; }
         public string Name { get; }
     }
+    private sealed class WithDictBagPoco { public Dictionary<string, object>? Bag { get; set; } }
+    private sealed class WithExpandoPoco { public ExpandoObject? Expando { get; set; } }
 }
