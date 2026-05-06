@@ -17,9 +17,9 @@ public class ExecutionPlanBuilderTests
         ConventionEngine.ResolveMissingMembers(typeMap, DefaultOpts());
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<FpSrc, FpDst>)lambda.Compile();
+        var del = (Func<FpSrc, MappingContext?, FpDst>)lambda.Compile();
 
-        var dst = del(new FpSrc { Id = 42 });
+        var dst = del(new FpSrc { Id = 42 }, null);
         Assert.Equal(42, dst.Id);
     }
 
@@ -30,9 +30,9 @@ public class ExecutionPlanBuilderTests
         ConventionEngine.ResolveMissingMembers(typeMap, DefaultOpts());
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<FpSrc?, FpDst?>)lambda.Compile();
+        var del = (Func<FpSrc?, MappingContext?, FpDst?>)lambda.Compile();
 
-        Assert.Null(del(null));
+        Assert.Null(del(null, null));
     }
 
     [Fact]
@@ -42,14 +42,14 @@ public class ExecutionPlanBuilderTests
         ConventionEngine.ResolveMissingMembers(typeMap, DefaultOpts());
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<FlatSrc, FlatDst>)lambda.Compile();
+        var del = (Func<FlatSrc, MappingContext?, FlatDst>)lambda.Compile();
 
         // Behavioural: walking through a null intermediate must not throw.
-        var dst = del(new FlatSrc { Customer = null! });
+        var dst = del(new FlatSrc { Customer = null! }, null);
         Assert.NotNull(dst);
         Assert.Null(dst.CustomerName);
 
-        var dst2 = del(new FlatSrc { Customer = new FlatCustomer { Name = "Ada" } });
+        var dst2 = del(new FlatSrc { Customer = new FlatCustomer { Name = "Ada" } }, null);
         Assert.Equal("Ada", dst2.CustomerName);
     }
 
@@ -63,9 +63,9 @@ public class ExecutionPlanBuilderTests
         typeMap.PropertyMaps.Add(pm);
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<FpSrc, FpDst>)lambda.Compile();
+        var del = (Func<FpSrc, MappingContext?, FpDst>)lambda.Compile();
 
-        Assert.Equal(99, del(new FpSrc { Id = 1 }).Id);
+        Assert.Equal(99, del(new FpSrc { Id = 1 }, null).Id);
     }
 
     [Fact]
@@ -77,10 +77,10 @@ public class ExecutionPlanBuilderTests
         typeMap.PropertyMaps.Add(pm);
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<FpSrc, FpDst>)lambda.Compile();
+        var del = (Func<FpSrc, MappingContext?, FpDst>)lambda.Compile();
 
         // Source has Id=42 but destination keeps default because property is ignored.
-        Assert.Equal(0, del(new FpSrc { Id = 42 }).Id);
+        Assert.Equal(0, del(new FpSrc { Id = 42 }, null).Id);
     }
 
     [Fact]
@@ -112,10 +112,10 @@ public class ExecutionPlanBuilderTests
         var registry = RegistryFor(typeMap, elementMap);
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, registry);
-        var del = (Func<List<InnerSrc>, List<InnerDst>>)lambda.Compile();
+        var del = (Func<List<InnerSrc>, MappingContext?, List<InnerDst>>)lambda.Compile();
 
         var input = new List<InnerSrc> { new() { Value = "a" }, new() { Value = "b" } };
-        var output = del(input);
+        var output = del(input, null);
 
         Assert.Equal(2, output.Count);
         Assert.Equal("a", output[0].Value);
@@ -130,9 +130,9 @@ public class ExecutionPlanBuilderTests
 
         var typeMap = new TypeMap(typeof(List<InnerSrc>), typeof(List<InnerDst>), MemberList.None);
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap, elementMap));
-        var del = (Func<List<InnerSrc>?, List<InnerDst>>)lambda.Compile();
+        var del = (Func<List<InnerSrc>?, MappingContext?, List<InnerDst>>)lambda.Compile();
 
-        var output = del(null);
+        var output = del(null, null);
         Assert.NotNull(output);
         Assert.Empty(output);
     }
@@ -145,10 +145,10 @@ public class ExecutionPlanBuilderTests
 
         var typeMap = new TypeMap(typeof(List<InnerSrc>), typeof(InnerDst[]), MemberList.None);
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap, elementMap));
-        var del = (Func<List<InnerSrc>, InnerDst[]>)lambda.Compile();
+        var del = (Func<List<InnerSrc>, MappingContext?, InnerDst[]>)lambda.Compile();
 
         var input = new List<InnerSrc> { new() { Value = "x" }, new() { Value = "y" }, new() { Value = "z" } };
-        var output = del(input);
+        var output = del(input, null);
 
         Assert.Equal(3, output.Length);
         Assert.Equal("x", output[0].Value);
@@ -162,9 +162,9 @@ public class ExecutionPlanBuilderTests
         ConventionEngine.ResolveMissingMembers(typeMap, DefaultOpts());
 
         var lambda = ExecutionPlanBuilder.Build(typeMap, RegistryFor(typeMap));
-        var del = (Func<CtorSrc, CtorDst>)lambda.Compile();
+        var del = (Func<CtorSrc, MappingContext?, CtorDst>)lambda.Compile();
 
-        var dst = del(new CtorSrc { DisplayName = "Alice" });
+        var dst = del(new CtorSrc { DisplayName = "Alice" }, null);
         Assert.Equal("Alice", dst.DisplayName);
     }
 }

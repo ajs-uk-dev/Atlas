@@ -67,7 +67,7 @@ public sealed class MapperConfigurationExpression
     /// <exception cref="ArgumentNullException">
     /// Thrown if <paramref name="sourceType"/> or <paramref name="destinationType"/> is null.
     /// </exception>
-    public void CreateMap(Type sourceType, Type destinationType,
+    public IOpenGenericMappingExpression CreateMap(Type sourceType, Type destinationType,
                           MemberList memberList = MemberList.None)
     {
         EnsureMutable();
@@ -106,6 +106,7 @@ public sealed class MapperConfigurationExpression
             $"CreateMap(typeof({sourceType.Name}), typeof({destinationType.Name}))");
 
         _openGenericMaps.Add(openMap);
+        return new OpenGenericMappingExpression(openMap);
     }
 
     /// <summary>Read-only snapshot of registered open-generic templates. Used by MapperConfiguration.</summary>

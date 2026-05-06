@@ -26,6 +26,7 @@ internal static class ProjectionPlanBuilder
     {
         RejectHooksOrThrow(tm);
         RejectDynamicOrThrow(tm);
+        RejectPreserveReferencesOrThrow(tm);
 
         var (ctor, ctorParamMaps, propertyMaps) = ClassifyBindings(tm);
 
@@ -345,6 +346,17 @@ internal static class ProjectionPlanBuilder
                 $"map is a dynamic-shape mapping ({tm.SourceType} → {tm.DestinationType}); " +
                 $"LINQ providers cannot translate runtime dictionary key lookups against arbitrary keys. " +
                 $"Use mapper.Map<>() instead.")
+        });
+    }
+
+    private static void RejectPreserveReferencesOrThrow(TypeMap tm)
+    {
+        if (!tm.PreserveReferences) return;
+        throw new AtlasProjectionException(new List<ProjectionDiagnostic>
+        {
+            new(tm.SourceType, tm.DestinationType, "(PreserveReferences)",
+                $"map has PreserveReferences set; LINQ providers cannot model identity tracking. " +
+                $"Use mapper.Map<>() instead, or remove PreserveReferences for this typemap.")
         });
     }
 

@@ -18,8 +18,13 @@ internal sealed class Mapper : IMapper
 
     public MapperConfiguration ConfigurationProvider { get; }
 
-    public TDestination Map<TSource, TDestination>(TSource source) =>
-        MappingInvoker.Invoke<TSource, TDestination>(_registry, source);
+    public TDestination Map<TSource, TDestination>(TSource source)
+    {
+        var pair = new TypePair(typeof(TSource), typeof(TDestination));
+        var tm = _registry.GetTypeMap(pair);
+        var ctx = tm is { PreserveReferences: true } ? new MappingContext() : null;
+        return MappingInvoker.Invoke<TSource, TDestination>(_registry, source, ctx);
+    }
 
     public TDestination Map<TDestination>(object source)
     {
@@ -29,9 +34,12 @@ internal sealed class Mapper : IMapper
         var method = typeof(MappingInvoker)
             .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!
             .MakeGenericMethod(srcType, typeof(TDestination));
+        var pair = new TypePair(srcType, typeof(TDestination));
+        var tm = _registry.GetTypeMap(pair);
+        var ctx = tm is { PreserveReferences: true } ? new MappingContext() : null;
         try
         {
-            return (TDestination)method.Invoke(null, [_registry, source])!;
+            return (TDestination)method.Invoke(null, [_registry, source, ctx])!;
         }
         catch (TargetInvocationException tie) when (tie.InnerException is not null)
         {
@@ -40,6 +48,11 @@ internal sealed class Mapper : IMapper
         }
     }
 
-    public void Map<TSource, TDestination>(TSource source, TDestination destination) =>
-        MappingInvoker.InvokeUpdate(_registry, source, destination);
+    public void Map<TSource, TDestination>(TSource source, TDestination destination)
+    {
+        var pair = new TypePair(typeof(TSource), typeof(TDestination));
+        var tm = _registry.GetTypeMap(pair);
+        var ctx = tm is { PreserveReferences: true } ? new MappingContext() : null;
+        MappingInvoker.InvokeUpdate(_registry, source, ctx, destination);
+    }
 }

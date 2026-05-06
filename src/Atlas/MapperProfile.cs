@@ -36,7 +36,7 @@ public abstract class MapperProfile
     /// <exception cref="ArgumentNullException">
     /// Thrown if <paramref name="sourceType"/> or <paramref name="destinationType"/> is null.
     /// </exception>
-    protected void CreateMap(Type sourceType, Type destinationType,
+    protected IOpenGenericMappingExpression CreateMap(Type sourceType, Type destinationType,
                              MemberList memberList = MemberList.None)
     {
         ArgumentNullException.ThrowIfNull(sourceType);
@@ -75,6 +75,7 @@ public abstract class MapperProfile
             originatingProfile: this);
 
         _openGenericMaps.Add(openMap);
+        return new OpenGenericMappingExpression(openMap);
     }
 
     /// <summary>Used by <see cref="MapperConfigurationExpression"/> to harvest the registered maps.</summary>

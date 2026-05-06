@@ -51,8 +51,8 @@ public class ExecutionPlanBuilderInheritanceTests
             c.CreateMap<EpAnimal, EpAnimalDto>().Include<EpDog, EpDogDto>();
             c.CreateMap<EpDog, EpDogDto>();
         });
-        var fn = (Func<EpAnimal, EpAnimalDto>)lambda.Compile();
-        var dst = fn(new EpAnimal { Name = "x" });
+        var fn = (Func<EpAnimal, MappingContext?, EpAnimalDto>)lambda.Compile();
+        var dst = fn(new EpAnimal { Name = "x" }, null);
         Assert.NotNull(dst);
         Assert.Equal("x", dst.Name);
         Assert.IsType<EpAnimalDto>(dst);
@@ -72,8 +72,8 @@ public class ExecutionPlanBuilderInheritanceTests
             c.CreateMap<EpDog, EpDogDto>();
             c.CreateMap<EpBeagle, EpBeagleDto>();
         });
-        var fn = (Func<EpAnimal, EpAnimalDto>)lambda.Compile();
-        var dst = fn(new EpBeagle { Name = "rex" });
+        var fn = (Func<EpAnimal, MappingContext?, EpAnimalDto>)lambda.Compile();
+        var dst = fn(new EpBeagle { Name = "rex" }, null);
         Assert.IsType<EpBeagleDto>(dst);
     }
 
@@ -85,8 +85,8 @@ public class ExecutionPlanBuilderInheritanceTests
             c.CreateMap<EpAnimal, EpAnimalDto>().Include<EpDog, EpDogDto>();
             c.CreateMap<EpDog, EpDogDto>();
         });
-        var fn = (Func<EpAnimal, EpAnimalDto>)lambda.Compile();
-        Assert.Null(fn(null!));
+        var fn = (Func<EpAnimal, MappingContext?, EpAnimalDto>)lambda.Compile();
+        Assert.Null(fn(null!, null));
     }
 
     [Fact]

@@ -83,6 +83,7 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildDictToPocoLambda_PropertyInit(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
 
         var dst = Expression.Variable(typeMap.DestinationType, "dst");
@@ -97,7 +98,7 @@ internal static class DynamicPlanBuilder
             if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap, ctxParam);
             if (propExpr is not null)
                 body.Add(propExpr);
         }
@@ -105,7 +106,7 @@ internal static class DynamicPlanBuilder
         body.Add(dst);
 
         var block = Expression.Block(new[] { dst }, body);
-        return Expression.Lambda(block, srcParam);
+        return Expression.Lambda(block, srcParam, ctxParam);
     }
 
     /// <summary>
@@ -115,6 +116,7 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildDictToPocoLambda_RequiredInit(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
 
         var dst = Expression.Variable(typeMap.DestinationType, "dst");
@@ -144,7 +146,7 @@ internal static class DynamicPlanBuilder
 
                 var convertCall = Expression.Call(
                     _convertObjectTo.MakeGenericMethod(propType),
-                    valueVar, registryConst, keyExpr);
+                    valueVar, registryConst, ctxParam, keyExpr);
                 var assign = Expression.Assign(dstPropExpr, convertCall);
 
                 var throwExpr = Expression.Throw(
@@ -160,7 +162,7 @@ internal static class DynamicPlanBuilder
             else
             {
                 var propExpr = EmitPropertyAssign(
-                    pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
+                    pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap, ctxParam);
                 if (propExpr is not null)
                     body.Add(propExpr);
             }
@@ -169,7 +171,7 @@ internal static class DynamicPlanBuilder
         body.Add(dst);
 
         var block = Expression.Block(new[] { dst }, body);
-        return Expression.Lambda(block, srcParam);
+        return Expression.Lambda(block, srcParam, ctxParam);
     }
 
     /// <summary>
@@ -180,6 +182,7 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildDictToPocoLambda_CtorInit(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
 
         var ctor = SelectBestConstructor(typeMap.DestinationType);
@@ -211,7 +214,7 @@ internal static class DynamicPlanBuilder
 
             var convertCall = Expression.Call(
                 _convertObjectTo.MakeGenericMethod(p.ParameterType),
-                valueVar, registryConst, keyExpr);
+                valueVar, registryConst, ctxParam, keyExpr);
             var assignParam = Expression.Assign(paramVar, convertCall);
 
             Expression defaultOrThrow = p.HasDefaultValue
@@ -244,7 +247,7 @@ internal static class DynamicPlanBuilder
             if (!pm.DestinationProperty.CanWrite) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap, ctxParam);
             if (propExpr is not null)
                 bodyStatements.Add(propExpr);
         }
@@ -252,7 +255,7 @@ internal static class DynamicPlanBuilder
         bodyStatements.Add(dst);
 
         var block = Expression.Block(allLocals, bodyStatements);
-        return Expression.Lambda(block, srcParam);
+        return Expression.Lambda(block, srcParam, ctxParam);
     }
 
     /// <summary>
@@ -262,6 +265,7 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildDictToPocoUpdateLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var dstParam = Expression.Parameter(typeMap.DestinationType, "dst");
         var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
 
@@ -277,7 +281,7 @@ internal static class DynamicPlanBuilder
             if (!pm.DestinationProperty.CanWrite) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dstParam, registryConst, cmpConst, tryGetValue, updateInPlace: true, typeMap);
+                pm, srcAsDict, dstParam, registryConst, cmpConst, tryGetValue, updateInPlace: true, typeMap, ctxParam);
             if (propExpr is not null)
                 statements.Add(propExpr);
         }
@@ -294,12 +298,13 @@ internal static class DynamicPlanBuilder
                 body);
         }
 
-        return Expression.Lambda(body, srcParam, dstParam);
+        return Expression.Lambda(body, srcParam, ctxParam, dstParam);
     }
 
     private static LambdaExpression BuildPocoToDictUpdateLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var dstParam = Expression.Parameter(typeMap.DestinationType, "dst");
 
         // Coerce destination to IDictionary<string, object> for indexer assignment.
@@ -318,7 +323,7 @@ internal static class DynamicPlanBuilder
         foreach (var pm in typeMap.PropertyMaps)
         {
             if (pm.DynamicKey is null || pm.SourcePath is null || pm.SourcePath.Members.Count == 0) continue;
-            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst);
+            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst, ctxParam);
             var assign = Expression.Assign(
                 Expression.MakeIndex(dstAsDict, indexer, new[] { Expression.Constant(pm.DynamicKey, typeof(string)) }),
                 serializeExpr);
@@ -338,7 +343,7 @@ internal static class DynamicPlanBuilder
                 blockExpr);
         }
 
-        return Expression.Lambda(blockExpr, srcParam, dstParam);
+        return Expression.Lambda(blockExpr, srcParam, ctxParam, dstParam);
     }
 
     /// <summary>
@@ -354,7 +359,8 @@ internal static class DynamicPlanBuilder
         Expression cmpConst,
         MethodInfo tryGetValue,
         bool updateInPlace,
-        TypeMap typeMap)
+        TypeMap typeMap,
+        ParameterExpression ctxParam)
     {
         var propInfo = pm.DestinationProperty!;
         var propType = propInfo.PropertyType;
@@ -374,21 +380,21 @@ internal static class DynamicPlanBuilder
             return EmitNestedPocoAssign(
                 keyStr, keyExpr, propType, valueVar, hasValue,
                 dstPropExpr, srcAsDict, registryConst, cmpConst, tryGetValue,
-                updateInPlace);
+                updateInPlace, ctxParam);
         }
         else if (collectionElementType is not null)
         {
             // Collection branch: List<T>, T[], or IEnumerable<T>
             return EmitCollectionAssign(
                 keyExpr, propType, collectionElementType, isArray, valueVar, hasValue,
-                dstPropExpr, srcAsDict, registryConst, tryGetValue);
+                dstPropExpr, srcAsDict, registryConst, tryGetValue, ctxParam);
         }
         else
         {
             // Scalar/primitive branch: ConvertObjectTo<TProp>, then apply global value transformers.
             Expression convertCall = Expression.Call(
                 _convertObjectTo.MakeGenericMethod(propType),
-                valueVar, registryConst, keyExpr);
+                valueVar, registryConst, ctxParam, keyExpr);
             convertCall = WrapWithTransformers(convertCall, propType, typeMap);
             var assign = Expression.Assign(dstPropExpr, convertCall);
             return Expression.Block(
@@ -428,7 +434,8 @@ internal static class DynamicPlanBuilder
         Expression registryConst,
         Expression cmpConst,
         MethodInfo tryGetValue,
-        bool updateInPlace)
+        bool updateInPlace,
+        ParameterExpression ctxParam)
     {
         // Closed Invoke<IDictionary<string, object>, TProp>
         var closedInvoke = _invokeMethod.MakeGenericMethod(_dictType, propType);
@@ -442,7 +449,7 @@ internal static class DynamicPlanBuilder
         var nestedDictVar = Expression.Variable(_dictType, "nd_" + keyStr);
 
         // Branch A (inside TryGetValue hit):
-        //   if (valueVar is IDictionary<string, object> nd) dst.Prop = Invoke/InvokeUpdate(registry, nd, ...)
+        //   if (valueVar is IDictionary<string, object> nd) dst.Prop = Invoke/InvokeUpdate(registry, nd, ctx, ...)
         //   else if (valueVar is TProp typed)              dst.Prop = typed
         //   else if (valueVar is null)                     dst.Prop = null / default
         //   else throw AtlasMappingException
@@ -452,25 +459,25 @@ internal static class DynamicPlanBuilder
         // null-assign: dst.Prop = default(TProp)  (null for reference types)
         var nullAssign = Expression.Assign(dstPropExpr, Expression.Default(propType));
 
-        // dict branch: create path (non-update) → dst.Prop = Invoke(registry, nestedDict)
-        // dict branch: update path with ctor   → dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, dst.Prop)
-        // dict branch: update path without ctor → dst.Prop = Invoke(registry, nestedDict)  [fallback: overwrite]
+        // dict branch: create path (non-update) → dst.Prop = Invoke(registry, nestedDict, ctx)
+        // dict branch: update path with ctor   → dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, ctx, dst.Prop)
+        // dict branch: update path without ctor → dst.Prop = Invoke(registry, nestedDict, ctx)  [fallback: overwrite]
         Expression dictBranchBody;
         if (updateInPlace && hasCtor)
         {
             // dst.Prop ??= new TPropType();
-            // InvokeUpdate<IDictionary<string,object>, TPropType>(registry, nestedDictCastVar, dst.Prop)
+            // InvokeUpdate<IDictionary<string,object>, TPropType>(registry, nestedDictCastVar, ctx, dst.Prop)
             var closedInvokeUpdate = _invokeUpdateMethod.MakeGenericMethod(_dictType, propType);
             dictBranchBody = Expression.Block(
                 Expression.IfThen(
                     Expression.Equal(dstPropExpr, Expression.Constant(null, propType)),
                     Expression.Assign(dstPropExpr, Expression.New(propType))),
-                Expression.Call(closedInvokeUpdate, registryConst, nestedDictCastVar, dstPropExpr));
+                Expression.Call(closedInvokeUpdate, registryConst, nestedDictCastVar, ctxParam, dstPropExpr));
         }
         else
         {
             dictBranchBody = Expression.Assign(dstPropExpr,
-                Expression.Call(closedInvoke, registryConst, nestedDictCastVar));
+                Expression.Call(closedInvoke, registryConst, nestedDictCastVar, ctxParam));
         }
 
         // typed branch: dst.Prop = (TProp)valueVar
@@ -507,8 +514,8 @@ internal static class DynamicPlanBuilder
         // Else branch (TryGetValue missed): ScanPrefix dot-notation fallback
         //   var nestedDict = ScanPrefix(src, "Prop.", cmp);
         //   if (nestedDict != null)
-        //     update path with ctor:    dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, dst.Prop)
-        //     otherwise:                dst.Prop = Invoke(registry, nestedDict)
+        //     update path with ctor:    dst.Prop ??= new TProp(); InvokeUpdate(registry, nestedDict, ctx, dst.Prop)
+        //     otherwise:                dst.Prop = Invoke(registry, nestedDict, ctx)
         var scanCall = Expression.Call(_scanPrefix, srcAsDict, prefixExpr, cmpConst);
         Expression scanFoundBody;
         if (updateInPlace && hasCtor)
@@ -518,12 +525,12 @@ internal static class DynamicPlanBuilder
                 Expression.IfThen(
                     Expression.Equal(dstPropExpr, Expression.Constant(null, propType)),
                     Expression.Assign(dstPropExpr, Expression.New(propType))),
-                Expression.Call(closedInvokeUpdate, registryConst, nestedDictVar, dstPropExpr));
+                Expression.Call(closedInvokeUpdate, registryConst, nestedDictVar, ctxParam, dstPropExpr));
         }
         else
         {
             scanFoundBody = Expression.Assign(dstPropExpr,
-                Expression.Call(closedInvoke, registryConst, nestedDictVar));
+                Expression.Call(closedInvoke, registryConst, nestedDictVar, ctxParam));
         }
 
         var elseBranch = Expression.Block(
@@ -552,7 +559,8 @@ internal static class DynamicPlanBuilder
         Expression dstPropExpr,
         Expression srcAsDict,
         Expression registryConst,
-        MethodInfo tryGetValue)
+        MethodInfo tryGetValue,
+        ParameterExpression ctxParam)
     {
         MethodInfo closedMethod;
         if (isArray)
@@ -560,7 +568,7 @@ internal static class DynamicPlanBuilder
         else
             closedMethod = _convertObjectToList.MakeGenericMethod(elementType);
 
-        var convertCall = Expression.Call(closedMethod, valueVar, registryConst, keyExpr);
+        var convertCall = Expression.Call(closedMethod, valueVar, registryConst, ctxParam, keyExpr);
         var assign = Expression.Assign(dstPropExpr, convertCall);
 
         return Expression.Block(
@@ -572,6 +580,7 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildPocoToDictLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var dstType = typeMap.DestinationType;
 
         // Concrete-type contract per design §3.3:
@@ -605,7 +614,7 @@ internal static class DynamicPlanBuilder
         foreach (var pm in typeMap.PropertyMaps)
         {
             if (pm.DynamicKey is null || pm.SourcePath is null || pm.SourcePath.Members.Count == 0) continue;
-            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst);
+            var serializeExpr = EmitSourceMemberSerialize(pm, srcParam, registryConst, ctxParam);
             var assign = Expression.Assign(
                 Expression.MakeIndex(dstAsDict, indexer, new[] { Expression.Constant(pm.DynamicKey, typeof(string)) }),
                 serializeExpr);
@@ -617,7 +626,7 @@ internal static class DynamicPlanBuilder
             : Expression.Convert(dstAsConcrete, dstType));
 
         var block = Expression.Block(new[] { dstAsConcrete, dstAsDict }, body);
-        return Expression.Lambda(block, srcParam);
+        return Expression.Lambda(block, srcParam, ctxParam);
     }
 
     /// <summary>
@@ -632,7 +641,8 @@ internal static class DynamicPlanBuilder
     private static Expression EmitSourceMemberSerialize(
         PropertyMap pm,
         ParameterExpression srcParam,
-        Expression registryConst)
+        Expression registryConst,
+        ParameterExpression ctxParam)
     {
         var srcMember = pm.SourcePath!.Members[0];
         var srcMemberType = srcMember.PropertyType;
@@ -642,17 +652,17 @@ internal static class DynamicPlanBuilder
         var collectionElementType = DynamicShape.GetCollectionElementType(srcMemberType);
         if (collectionElementType is not null)
         {
-            // SerializeCollection<TElement>(src.Member, registry) returns List<object?>?
+            // SerializeCollection<TElement>(src.Member, registry, ctx) returns List<object?>?
             // Cast result to object? for the dict indexer assignment.
             var closedMethod = _serializeCollection.MakeGenericMethod(collectionElementType);
-            var call = Expression.Call(closedMethod, memberAccess, registryConst);
+            var call = Expression.Call(closedMethod, memberAccess, registryConst, ctxParam);
             return Expression.Convert(call, typeof(object));
         }
 
         // 2. Dictionary<TKey, TValue> where TValue is NOT object (avoid treating dynamic shapes as typed dicts)?
         if (IsTypedPocoDictionary(srcMemberType, out var keyType, out var valueType))
         {
-            // SerializeDictionary<TKey, TValue>(src.Member, registry) returns IDictionary<string, object?>?
+            // SerializeDictionary<TKey, TValue>(src.Member, registry, ctx) returns IDictionary<string, object?>?
             // Cast to object? for the dict indexer.
             var closedMethod = _serializeDictionary.MakeGenericMethod(keyType!, valueType!);
 
@@ -662,7 +672,7 @@ internal static class DynamicPlanBuilder
                 ? (Expression)memberAccess
                 : Expression.Convert(memberAccess, iDictType);
 
-            var call = Expression.Call(closedMethod, argExpr, registryConst);
+            var call = Expression.Call(closedMethod, argExpr, registryConst, ctxParam);
             return Expression.Convert(call, typeof(object));
         }
 
@@ -676,7 +686,7 @@ internal static class DynamicPlanBuilder
         // 4. Scalar / enum / nested POCO / string — existing Task 7 SerializeValue path.
         var boxed = Expression.Convert(memberAccess, typeof(object));
         return Expression.Call(_serializeValue, boxed,
-            Expression.Constant(srcMemberType, typeof(Type)), registryConst);
+            Expression.Constant(srcMemberType, typeof(Type)), registryConst, ctxParam);
     }
 
     /// <summary>

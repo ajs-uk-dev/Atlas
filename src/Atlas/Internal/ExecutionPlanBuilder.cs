@@ -67,8 +67,9 @@ internal static class ExecutionPlanBuilder
             dstType);
 
         var switchExpr = Expression.Switch(srcParam, defaultBody, cases.ToArray());
-        var funcType = typeof(Func<,>).MakeGenericType(srcType, dstType);
-        return Expression.Lambda(funcType, switchExpr, srcParam);
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
+        var funcType = typeof(Func<,,>).MakeGenericType(srcType, typeof(MappingContext), dstType);
+        return Expression.Lambda(funcType, switchExpr, srcParam, ctxParam);
     }
 
     private static LambdaExpression BuildBaseBody(TypeMap typeMap, MapperRegistry registry)
@@ -91,6 +92,7 @@ internal static class ExecutionPlanBuilder
         MapperRegistry registry)
     {
         var srcParam = baseLambda.Parameters[0];
+        var ctxParam = baseLambda.Parameters[1];
 
         // Inline the base body (substitute baseLambda's parameter for our srcParam).
         // baseLambda.Parameters[0] IS srcParam after our wrap, so the body already references it.
@@ -108,14 +110,15 @@ internal static class ExecutionPlanBuilder
             // src is TDerivedSrc
             var typeIsExpr = Expression.TypeIs(srcParam, derivedSrc);
 
-            // MappingInvoker.Invoke<TDerivedSrc, TDerivedDst>(registry, (TDerivedSrc)src)
+            // MappingInvoker.Invoke<TDerivedSrc, TDerivedDst>(registry, (TDerivedSrc)src, ctx)
             var method = typeof(MappingInvoker)
                 .GetMethod(nameof(MappingInvoker.Invoke), System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
                 .MakeGenericMethod(derivedSrc, derivedDst);
             var invoke = Expression.Call(
                 method,
                 Expression.Constant(registry),
-                Expression.Convert(srcParam, derivedSrc));
+                Expression.Convert(srcParam, derivedSrc),
+                ctxParam);
 
             // Cast to base destination.
             var upcast = Expression.Convert(invoke, typeMap.DestinationType);
@@ -133,8 +136,8 @@ internal static class ExecutionPlanBuilder
                 body);
         }
 
-        var funcType = typeof(Func<,>).MakeGenericType(typeMap.SourceType, typeMap.DestinationType);
-        return Expression.Lambda(funcType, body, srcParam);
+        var funcType = typeof(Func<,,>).MakeGenericType(typeMap.SourceType, typeof(MappingContext), typeMap.DestinationType);
+        return Expression.Lambda(funcType, body, srcParam, ctxParam);
     }
 
     /// <summary>Build the update-in-place lambda for the given type map.</summary>
@@ -144,10 +147,49 @@ internal static class ExecutionPlanBuilder
         if (typeMap.IsDynamic)
             return DynamicPlanBuilder.BuildUpdate(typeMap, registry);
 
-        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
-        var destParam = Expression.Parameter(typeMap.DestinationType, "dest");
+        var srcType = typeMap.SourceType;
+        var dstType = typeMap.DestinationType;
+        var srcParam = Expression.Parameter(srcType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
+        var destParam = Expression.Parameter(dstType, "dest");
+
+        // Return label for early-exit (void lambda uses a void-typed label).
+        var returnLabel = Expression.Label("return");
 
         var statements = new List<Expression>();
+        var locals = new List<ParameterExpression>();
+
+        // ── Cache preamble: only for reference-type sources ──────────────────────
+        if (srcType.IsClass)
+        {
+            // Cache check: if (ctx != null && ctx.TryGet((object)src, typeof(TDst), out cached))
+            //                 return;   // already being updated — skip to break cycles
+            var cachedVar = Expression.Variable(typeof(object), "cached");
+            locals.Add(cachedVar);
+
+            var ctxNotNull = Expression.NotEqual(
+                ctxParam, Expression.Constant(null, typeof(MappingContext)));
+            var tryGetCall = Expression.Call(
+                ctxParam,
+                MappingContextTryGetMethod,
+                Expression.Convert(srcParam, typeof(object)),
+                Expression.Constant(dstType, typeof(Type)),
+                cachedVar);
+            statements.Add(Expression.IfThen(
+                Expression.AndAlso(ctxNotNull, tryGetCall),
+                Expression.Return(returnLabel)));
+
+            // Cache register: ctx.Register immediately before member emit.
+            // if (ctx != null) ctx.Register((object)src, typeof(TDst), (object)dest);
+            statements.Add(Expression.IfThen(
+                Expression.NotEqual(ctxParam, Expression.Constant(null, typeof(MappingContext))),
+                Expression.Call(
+                    ctxParam,
+                    MappingContextRegisterMethod,
+                    Expression.Convert(srcParam, typeof(object)),
+                    Expression.Constant(dstType, typeof(Type)),
+                    Expression.Convert(destParam, typeof(object)))));
+        }
 
         // NEW: emit BeforeHooks.
         foreach (var hookEntry in typeMap.BeforeHooks)
@@ -158,7 +200,7 @@ internal static class ExecutionPlanBuilder
             if (pm.Ignored) continue;
             if (pm.DestinationProperty is null) continue;     // ctor params skipped on update
 
-            var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
+            var sourceExpr = BuildSourceExpression(pm, srcParam, ctxParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
             var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
@@ -186,27 +228,45 @@ internal static class ExecutionPlanBuilder
         foreach (var hookEntry in typeMap.AfterHooks)
             statements.Add(BuildHookCall(hookEntry, srcParam, destParam, registry));
 
-        Expression body = statements.Count > 0
-            ? Expression.Block(statements)
-            : Expression.Empty();
+        // Return label at end (default fall-through for void lambdas).
+        statements.Add(Expression.Label(returnLabel));
 
-        if (typeMap.SourceType.IsClass)
+        Expression body = locals.Count > 0
+            ? Expression.Block(locals, statements)
+            : (statements.Count > 0
+                ? Expression.Block(statements)
+                : Expression.Empty());
+
+        if (srcType.IsClass)
         {
             body = Expression.IfThen(
-                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType))),
+                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, srcType))),
                 body);
         }
 
-        return Expression.Lambda(body, srcParam, destParam);
+        return Expression.Lambda(body, srcParam, ctxParam, destParam);
     }
 
     // ---- POCO ----
+
+    // Cached MethodInfo for MappingContext.TryGet and MappingContext.Register,
+    // resolved once to avoid repeated GetMethod lookups per compile.
+    private static readonly MethodInfo MappingContextTryGetMethod =
+        typeof(MappingContext).GetMethod(
+            nameof(MappingContext.TryGet),
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+    private static readonly MethodInfo MappingContextRegisterMethod =
+        typeof(MappingContext).GetMethod(
+            nameof(MappingContext.Register),
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     private static LambdaExpression BuildPocoLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcType = typeMap.SourceType;
         var dstType = typeMap.DestinationType;
         var srcParam = Expression.Parameter(srcType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var destVar = Expression.Variable(dstType, "dest");
 
         var (ctor, ctorParamMaps, propertyMaps) = ClassifyBindings(typeMap);
@@ -231,7 +291,7 @@ internal static class ExecutionPlanBuilder
                 }
                 else
                 {
-                    sourceExpr = BuildSourceExpression(pm, srcParam, registry, p.ParameterType)
+                    sourceExpr = BuildSourceExpression(pm, srcParam, ctxParam, registry, p.ParameterType)
                         ?? Expression.Default(p.ParameterType);
                 }
                 var transformed = WrapWithTransformers(sourceExpr, p.ParameterType, typeMap);
@@ -252,10 +312,50 @@ internal static class ExecutionPlanBuilder
             newDest = Expression.New(ctor, args);
         }
 
-        var statements = new List<Expression>
+        // Return label used by the cache-hit early-exit path.
+        var returnLabel = Expression.Label(dstType, "return");
+
+        var statements = new List<Expression>();
+        var locals = new List<ParameterExpression> { destVar };
+
+        // ── Cache preamble: only for reference-type sources ──────────────────────
+        if (srcType.IsClass)
         {
-            Expression.Assign(destVar, newDest),
-        };
+            // Declare a local to receive the out parameter from TryGet.
+            var cachedVar = Expression.Variable(typeof(object), "cached");
+            locals.Add(cachedVar);
+
+            // if (ctx != null && ctx.TryGet((object)src, typeof(TDst), out cached))
+            //     return (TDst)cached;
+            var ctxNotNull = Expression.NotEqual(
+                ctxParam, Expression.Constant(null, typeof(MappingContext)));
+            var tryGetCall = Expression.Call(
+                ctxParam,
+                MappingContextTryGetMethod,
+                Expression.Convert(srcParam, typeof(object)),
+                Expression.Constant(dstType, typeof(Type)),
+                cachedVar);
+            statements.Add(Expression.IfThen(
+                Expression.AndAlso(ctxNotNull, tryGetCall),
+                Expression.Return(returnLabel, Expression.Convert(cachedVar, dstType))));
+        }
+
+        // ── Allocate destination ─────────────────────────────────────────────────
+        statements.Add(Expression.Assign(destVar, newDest));
+
+        // ── Cache register: immediately after allocation, before member emit ─────
+        if (srcType.IsClass)
+        {
+            // if (ctx != null) ctx.Register((object)src, typeof(TDst), (object)dest);
+            statements.Add(Expression.IfThen(
+                Expression.NotEqual(ctxParam, Expression.Constant(null, typeof(MappingContext))),
+                Expression.Call(
+                    ctxParam,
+                    MappingContextRegisterMethod,
+                    Expression.Convert(srcParam, typeof(object)),
+                    Expression.Constant(dstType, typeof(Type)),
+                    Expression.Convert(destVar, typeof(object)))));
+        }
 
         // NEW: emit BeforeHooks (FIFO order).
         foreach (var hookEntry in typeMap.BeforeHooks)
@@ -266,7 +366,7 @@ internal static class ExecutionPlanBuilder
             if (pm.Ignored) continue;
             if (pm.DestinationProperty is null) continue;
 
-            var sourceExpr = BuildSourceExpression(pm, srcParam, registry, pm.DestinationProperty.PropertyType);
+            var sourceExpr = BuildSourceExpression(pm, srcParam, ctxParam, registry, pm.DestinationProperty.PropertyType);
             if (sourceExpr is null) continue;
 
             var transformed = WrapWithTransformers(sourceExpr, pm.DestinationProperty.PropertyType, typeMap);
@@ -289,9 +389,10 @@ internal static class ExecutionPlanBuilder
         foreach (var hookEntry in typeMap.AfterHooks)
             statements.Add(BuildHookCall(hookEntry, srcParam, destVar, registry));
 
-        statements.Add(destVar);
+        // Return label at end: default value is destVar (normal non-cached path).
+        statements.Add(Expression.Label(returnLabel, destVar));
 
-        Expression body = Expression.Block(new[] { destVar }, statements);
+        Expression body = Expression.Block(locals, statements);
 
         if (srcType.IsClass)
         {
@@ -301,7 +402,7 @@ internal static class ExecutionPlanBuilder
                 body);
         }
 
-        return Expression.Lambda(body, srcParam);
+        return Expression.Lambda(body, srcParam, ctxParam);
     }
 
     private static (ConstructorInfo ctor,
@@ -344,6 +445,7 @@ internal static class ExecutionPlanBuilder
     private static Expression? BuildSourceExpression(
         PropertyMap pm,
         ParameterExpression srcParam,
+        ParameterExpression ctxParam,
         MapperRegistry registry,
         Type targetType)
     {
@@ -371,7 +473,7 @@ internal static class ExecutionPlanBuilder
         // registered TypeMaps).
         resolved = ApplyNullSubstitute(resolved!, pm);
 
-        return ConvertOrMap(resolved, targetType, registry);
+        return ConvertOrMap(resolved, targetType, ctxParam, registry);
     }
 
     private static Expression BuildPathAccess(Expression source, IReadOnlyList<PropertyInfo> path)
@@ -395,7 +497,7 @@ internal static class ExecutionPlanBuilder
         return current;
     }
 
-    private static Expression ConvertOrMap(Expression source, Type targetType, MapperRegistry registry)
+    private static Expression ConvertOrMap(Expression source, Type targetType, ParameterExpression ctxParam, MapperRegistry registry)
     {
         if (source.Type == targetType) return source;
         if (targetType.IsAssignableFrom(source.Type)) return Expression.Convert(source, targetType);
@@ -424,21 +526,21 @@ internal static class ExecutionPlanBuilder
         }
 
         if (IsCollection(source.Type) && IsCollection(targetType))
-            return BuildCollectionInvoke(source, targetType, registry);
+            return BuildCollectionInvoke(source, targetType, ctxParam, registry);
 
         // Fallback: nested map invocation
-        return BuildNestedInvoke(source, targetType, registry);
+        return BuildNestedInvoke(source, targetType, ctxParam, registry);
     }
 
-    private static Expression BuildNestedInvoke(Expression source, Type destType, MapperRegistry registry)
+    private static Expression BuildNestedInvoke(Expression source, Type destType, ParameterExpression ctxParam, MapperRegistry registry)
     {
         var method = typeof(MappingInvoker)
             .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!
             .MakeGenericMethod(source.Type, destType);
-        return Expression.Call(method, Expression.Constant(registry), source);
+        return Expression.Call(method, Expression.Constant(registry), source, ctxParam);
     }
 
-    private static Expression BuildCollectionInvoke(Expression source, Type destType, MapperRegistry registry)
+    private static Expression BuildCollectionInvoke(Expression source, Type destType, ParameterExpression ctxParam, MapperRegistry registry)
     {
         var srcElement = GetEnumerableElementType(source.Type)!;
         var dstElement = GetEnumerableElementType(destType)!;
@@ -455,7 +557,7 @@ internal static class ExecutionPlanBuilder
             ? source
             : Expression.Convert(source, typeof(IEnumerable<>).MakeGenericType(srcElement));
 
-        return Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable);
+        return Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable, ctxParam);
     }
 
     // ---- Custom converter ----
@@ -463,10 +565,11 @@ internal static class ExecutionPlanBuilder
     private static LambdaExpression BuildConverterLambda(TypeMap typeMap)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var converter = typeMap.CustomConverter!;
-        // Wrap the converter delegate in a Func<TSource, TDestination>.
+        // Wrap the converter delegate in a Func<TSource, MappingContext?, TDestination>.
         var invoke = Expression.Invoke(Expression.Constant(converter), srcParam);
-        return Expression.Lambda(invoke, srcParam);
+        return Expression.Lambda(invoke, srcParam, ctxParam);
     }
 
     // ---- Collections ----
@@ -474,6 +577,7 @@ internal static class ExecutionPlanBuilder
     private static LambdaExpression BuildCollectionLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var srcElement = GetEnumerableElementType(typeMap.SourceType)!;
         var dstElement = GetEnumerableElementType(typeMap.DestinationType)!;
 
@@ -490,8 +594,8 @@ internal static class ExecutionPlanBuilder
             ? (Expression)srcParam
             : Expression.Convert(srcParam, enumerableType);
 
-        var call = Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable);
-        return Expression.Lambda(call, srcParam);
+        var call = Expression.Call(method, Expression.Constant(registry), sourceAsEnumerable, ctxParam);
+        return Expression.Lambda(call, srcParam, ctxParam);
     }
 
     // ---- Dictionaries ----
@@ -499,6 +603,7 @@ internal static class ExecutionPlanBuilder
     private static LambdaExpression BuildDictionaryLambda(TypeMap typeMap, MapperRegistry registry)
     {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var ctxParam = Expression.Parameter(typeof(MappingContext), "ctx");
         var srcArgs = typeMap.SourceType.GetGenericArguments();
         var dstArgs = typeMap.DestinationType.GetGenericArguments();
 
@@ -506,8 +611,8 @@ internal static class ExecutionPlanBuilder
             .GetMethod(nameof(MappingInvoker.InvokeToDictionary), BindingFlags.Public | BindingFlags.Static)!
             .MakeGenericMethod(srcArgs[0], srcArgs[1], dstArgs[0], dstArgs[1]);
 
-        var call = Expression.Call(method, Expression.Constant(registry), srcParam);
-        return Expression.Lambda(call, srcParam);
+        var call = Expression.Call(method, Expression.Constant(registry), srcParam, ctxParam);
+        return Expression.Lambda(call, srcParam, ctxParam);
     }
 
     // ---- Type helpers ----

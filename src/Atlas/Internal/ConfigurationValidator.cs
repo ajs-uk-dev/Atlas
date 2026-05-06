@@ -32,6 +32,9 @@ internal static class ConfigurationValidator
             // NullSubstitute rules (always-on; unreachable + type-mismatch).
             ValidateNullSubstitutes(tm, errors);
 
+            // PreserveReferences rules (Atlas v2 #11; reject PreserveReferences + ConvertUsing).
+            ValidatePreserveReferences(tm, errors);
+
             // Strict-mode enum source-side coverage (Task 9).
             if (enumValidationEnabled)
                 ValidateEnumStrict(tm, errors);
@@ -388,5 +391,20 @@ internal static class ConfigurationValidator
     {
         var underlying = Nullable.GetUnderlyingType(sourceType);
         return underlying is not null ? $"{underlying.Name}?" : sourceType.Name;
+    }
+
+    private static void ValidatePreserveReferences(TypeMap tm, List<ConfigurationError> errors)
+    {
+        if (!tm.PreserveReferences) return;
+
+        if (tm.CustomConverter is not null)
+        {
+            errors.Add(new ConfigurationError(
+                tm.SourceType, tm.DestinationType, "(PreserveReferences)",
+                $"TypeMap {tm.SourceType.Name} → {tm.DestinationType.Name} has both PreserveReferences " +
+                $"and ConvertUsing. These are incompatible: ConvertUsing replaces the mapping body, " +
+                "leaving no member-emit pipeline for the cycle-cache to wrap. Remove one of the two " +
+                "registrations. (Atlas v2 #11 — see docs/Atlas-Design-ReferenceHandling.md §6.1.)"));
+        }
     }
 }

@@ -113,6 +113,15 @@ internal sealed class TypeMap
     /// </summary>
     public bool IsDynamic { get; set; }
 
+    /// <summary>
+    /// True when this typemap was registered with PreserveReferences()
+    /// (Atlas v2 #11). Causes IMapper.Map to allocate a MappingContext at the public-API boundary; causes
+    /// ExecutionPlanBuilder to emit cache-check + cache-register instructions in the compiled lambda;
+    /// causes ConfigurationValidator to reject ConvertUsing combos; causes Atlas.Projections to reject
+    /// the typemap at projection-build time.
+    /// </summary>
+    public bool PreserveReferences { get; set; }
+
     public Delegate? CustomConverter { get; set; }
     public bool IsSealed { get; private set; }
 
