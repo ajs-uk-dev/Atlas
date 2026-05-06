@@ -20,6 +20,12 @@ internal static class DynamicPlanBuilder
 
     private static LambdaExpression BuildDictToPocoLambda(TypeMap typeMap, MapperRegistry registry)
     {
+        if (typeMap.DestinationType.GetConstructor(Type.EmptyTypes) is null)
+            throw new AtlasMappingException(
+                $"Dynamic dict→POCO mapping for '{typeMap.DestinationType.FullName}' requires a public " +
+                "parameterless constructor. Constructor-injection support is planned for Task 6 of the " +
+                "Atlas v2 Dynamic Mapping feature.");
+
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
 
         // Coerce src parameter to IDictionary<string, object> for uniform handling.

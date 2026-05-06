@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Dynamic;
 using Atlas;
 
 namespace Atlas.Tests;
@@ -94,6 +95,18 @@ public class MapperDictToPocoTests
         var dict = new Dictionary<string, object> { ["Id"] = "not-a-number" };
         var ex = Assert.Throws<AtlasMappingException>(() => mapper.Map<SimplePoco>(dict));
         Assert.Contains("Id", ex.Message);
+    }
+
+    [Fact]
+    public void Map_ExpandoObjectSource_PopulatesProperties()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        dynamic e = new ExpandoObject();
+        e.Id = 7;
+        e.Name = "x";
+        var p = mapper.Map<ExpandoObject, SimplePoco>(e);
+        Assert.Equal(7, p.Id);
+        Assert.Equal("x", p.Name);
     }
 
     private sealed class SimplePoco
