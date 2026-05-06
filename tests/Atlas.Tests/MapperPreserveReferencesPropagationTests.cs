@@ -49,6 +49,25 @@ public class MapperPreserveReferencesPropagationTests
     }
 
     [Fact]
+    public void ReverseMap_OrderIndependent_PreserveReferencesAfterReverseMap_PropagatesToReverse()
+    {
+        // Verify the fix for holistic-review I-1: PreserveReferences() should propagate to the reverse
+        // pair regardless of fluent-call ordering.
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<Person, PersonDto>().ReverseMap().PreserveReferences());
+
+        var forwardTm = cfg.Internal_Registry.GetTypeMap(new TypePair(typeof(Person), typeof(PersonDto)));
+        var reverseTm = cfg.Internal_Registry.GetTypeMap(new TypePair(typeof(PersonDto), typeof(Person)));
+        Assert.NotNull(forwardTm);
+        Assert.NotNull(reverseTm);
+        Assert.True(forwardTm!.PreserveReferences);
+        Assert.True(reverseTm!.PreserveReferences,
+            "Reverse pair should inherit PreserveReferences regardless of fluent-call ordering. " +
+            "If this fails, the fix in MappingExpression.PreserveReferences() to propagate to " +
+            "CachedReverseExpression's TypeMap is missing.");
+    }
+
+    [Fact]
     public void OpenGeneric_PropagatesFromTemplateToClosedMaterialization()
     {
         var cfg = new MapperConfiguration(c =>

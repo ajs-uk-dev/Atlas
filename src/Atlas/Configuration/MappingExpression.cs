@@ -13,6 +13,10 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
     public TypeMap TypeMap { get; }
     private readonly Action<TypeMap>? _sink;
 
+    // When this is a reverse MappingExpression (created by ReverseMap()), holds the forward
+    // TypeMap so that PreserveReferences() can propagate back to it regardless of ordering.
+    private TypeMap? _linkedForwardTypeMap;
+
     public MappingExpression(TypeMap typeMap, Action<TypeMap>? sink = null)
     {
         TypeMap = typeMap;
@@ -155,7 +159,10 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
         };
         _sink(reverseTm);
 
-        var reverseExpr = new MappingExpression<TDestination, TSource>(reverseTm, _sink);
+        var reverseExpr = new MappingExpression<TDestination, TSource>(reverseTm, _sink)
+        {
+            _linkedForwardTypeMap = TypeMap
+        };
         TypeMap.CachedReverseExpression = reverseExpr;
         return reverseExpr;
     }
@@ -206,6 +213,18 @@ internal sealed class MappingExpression<TSource, TDestination> : IMappingExpress
     {
         TypeMap.EnsureMutable();
         TypeMap.PreserveReferences = true;
+
+        // Propagate to the reverse pair if it was already created via .ReverseMap() before this call
+        // (.PreserveReferences().ReverseMap() already works; this covers .ReverseMap().PreserveReferences()
+        // called on the FORWARD expression — holistic review I-1).
+        if (TypeMap.CachedReverseExpression is MappingExpression<TDestination, TSource> reverseExpr)
+            reverseExpr.TypeMap.PreserveReferences = true;
+
+        // Propagate back to the forward TypeMap when this IS the reverse expression
+        // (.ReverseMap().PreserveReferences() called on the REVERSE expression — holistic review I-1).
+        if (_linkedForwardTypeMap is { } forwardTm)
+            forwardTm.PreserveReferences = true;
+
         return this;
     }
 
