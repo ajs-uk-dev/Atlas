@@ -204,11 +204,14 @@ internal static class MappingInvoker
         StringComparison cmp)
     {
         Dictionary<string, object>? result = null;
+        var resultComparer = cmp == StringComparison.OrdinalIgnoreCase
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
         foreach (var kv in src)
         {
             if (kv.Key.StartsWith(prefix, cmp))
             {
-                result ??= new Dictionary<string, object>();
+                result ??= new Dictionary<string, object>(resultComparer);
                 result[kv.Key.Substring(prefix.Length)] = kv.Value;
             }
         }

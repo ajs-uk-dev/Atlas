@@ -97,7 +97,7 @@ internal static class DynamicPlanBuilder
             if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
             if (propExpr is not null)
                 body.Add(propExpr);
         }
@@ -160,7 +160,7 @@ internal static class DynamicPlanBuilder
             else
             {
                 var propExpr = EmitPropertyAssign(
-                    pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
+                    pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
                 if (propExpr is not null)
                     body.Add(propExpr);
             }
@@ -244,7 +244,7 @@ internal static class DynamicPlanBuilder
             if (!pm.DestinationProperty.CanWrite) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false, typeMap);
             if (propExpr is not null)
                 bodyStatements.Add(propExpr);
         }
@@ -277,7 +277,7 @@ internal static class DynamicPlanBuilder
             if (!pm.DestinationProperty.CanWrite) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dstParam, registryConst, cmpConst, tryGetValue, updateInPlace: true);
+                pm, srcAsDict, dstParam, registryConst, cmpConst, tryGetValue, updateInPlace: true, typeMap);
             if (propExpr is not null)
                 statements.Add(propExpr);
         }
@@ -353,7 +353,8 @@ internal static class DynamicPlanBuilder
         Expression registryConst,
         Expression cmpConst,
         MethodInfo tryGetValue,
-        bool updateInPlace)
+        bool updateInPlace,
+        TypeMap typeMap)
     {
         var propInfo = pm.DestinationProperty!;
         var propType = propInfo.PropertyType;
@@ -384,10 +385,11 @@ internal static class DynamicPlanBuilder
         }
         else
         {
-            // Scalar/primitive branch: ConvertObjectTo<TProp>
-            var convertCall = Expression.Call(
+            // Scalar/primitive branch: ConvertObjectTo<TProp>, then apply global value transformers.
+            Expression convertCall = Expression.Call(
                 _convertObjectTo.MakeGenericMethod(propType),
                 valueVar, registryConst, keyExpr);
+            convertCall = WrapWithTransformers(convertCall, propType, typeMap);
             var assign = Expression.Assign(dstPropExpr, convertCall);
             return Expression.Block(
                 new[] { valueVar, hasValue },
@@ -768,5 +770,31 @@ internal static class DynamicPlanBuilder
     {
         isArray = t.IsArray;
         return DynamicShape.GetCollectionElementType(t);
+    }
+
+    /// <summary>
+    /// Wraps <paramref name="sourceExpr"/> with any registered value transformers for
+    /// <paramref name="destType"/> from <paramref name="typeMap"/>.EffectiveTransformers.
+    /// Uses inline parameter substitution (NOT Expression.Invoke) so the expression tree
+    /// remains translatable by EF Core and other LINQ providers.
+    /// </summary>
+    private static Expression WrapWithTransformers(Expression sourceExpr, Type destType, TypeMap typeMap)
+    {
+        if (!typeMap.EffectiveTransformers.TryGetValue(destType, out var transformers))
+            return sourceExpr;
+
+        Expression current = sourceExpr;
+        foreach (var transformer in transformers)
+        {
+            var paramSubst = new DynamicParameterReplacer(transformer.Parameters[0], current);
+            current = paramSubst.Visit(transformer.Body)!;
+        }
+        return current;
+    }
+
+    private sealed class DynamicParameterReplacer(ParameterExpression from, Expression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) =>
+            node == from ? to : base.VisitParameter(node);
     }
 }

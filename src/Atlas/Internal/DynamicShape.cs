@@ -34,11 +34,12 @@ internal static class DynamicShape
         if (IsDynamicShape(pair.Source) ^ IsDynamicShape(pair.Destination))
             return true;
 
-        // Collection-of-dynamic-shape pairs, e.g.
-        //   List<IDictionary<string,object>> → List<SimplePoco>
+        // Collection-of-dynamic-shape pairs (both directions), e.g.
+        //   List<IDictionary<string,object>> → List<SimplePoco>   (dict→POCO direction)
+        //   List<SimplePoco> → List<ExpandoObject>                 (POCO→dict direction)
         var srcEl = GetCollectionElementType(pair.Source);
         var dstEl = GetCollectionElementType(pair.Destination);
-        if (srcEl is not null && dstEl is not null && IsDynamicShape(srcEl))
+        if (srcEl is not null && dstEl is not null && (IsDynamicShape(srcEl) || IsDynamicShape(dstEl)))
             return true;
 
         return false;
@@ -102,10 +103,11 @@ internal static class DynamicShape
         ValueTransformerCollection globalTransformers,
         ConventionOptions conventions)
     {
-        // Collection-of-dynamic-shape: both sides are collections, source element is a dynamic shape.
+        // Collection-of-dynamic-shape (both directions): both sides are collections and at least
+        // one element type is a recognized dynamic shape.
         var srcEl = GetCollectionElementType(pair.Source);
         var dstEl = GetCollectionElementType(pair.Destination);
-        if (srcEl is not null && dstEl is not null && IsDynamicShape(srcEl))
+        if (srcEl is not null && dstEl is not null && (IsDynamicShape(srcEl) || IsDynamicShape(dstEl)))
             return BuildCollectionDynamicTypeMap(pair, globalTransformers);
 
         if (IsDynamicShape(pair.Source))

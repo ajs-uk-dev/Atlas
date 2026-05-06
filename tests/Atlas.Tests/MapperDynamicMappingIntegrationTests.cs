@@ -27,7 +27,7 @@ public class MapperDynamicMappingIntegrationTests
         Assert.Equal(42, p.Age);
     }
 
-    [Fact(Skip = "Production issue: dot-notation prefix scan does not apply CaseSensitive=false setting; nested key 'customer.name' fails to populate Customer.Name")]
+    [Fact]
     public void DotNotationPrefixScan_RespectsCaseInsensitiveSetting()
     {
         var mapper = new MapperConfiguration(c => c.CaseSensitive = false).CreateMapper();
@@ -36,7 +36,7 @@ public class MapperDynamicMappingIntegrationTests
         Assert.Equal("alice", p.Customer!.Name);
     }
 
-    [Fact(Skip = "Production issue: global-scope ValueTransformers are not applied during dynamic Dict→POCO conversion")]
+    [Fact]
     public void GlobalScopeValueTransformer_FiresDuringDictToPocoConversion()
     {
         var mapper = new MapperConfiguration(c =>
@@ -84,7 +84,7 @@ public class MapperDynamicMappingIntegrationTests
         Assert.Equal("bob", result[1].Name);
     }
 
-    [Fact(Skip = "Production issue: Map<List<NamePoco>, List<ExpandoObject>> throws InvalidOperationException — no map registered for List`1 -> List`1 when destination element type is ExpandoObject")]
+    [Fact]
     public void CollectionOfPocoToDynamic_RecursesIntoDynamicElementMap()
     {
         var mapper = new MapperConfiguration(_ => { }).CreateMapper();
