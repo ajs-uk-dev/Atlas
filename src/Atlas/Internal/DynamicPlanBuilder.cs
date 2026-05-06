@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace Atlas.Internal;
 
@@ -21,6 +22,8 @@ internal static class DynamicPlanBuilder
         .GetMethod(nameof(MappingInvoker.Invoke), BindingFlags.Public | BindingFlags.Static)!;
     private static readonly MethodInfo _scanPrefix = typeof(MappingInvoker)
         .GetMethod(nameof(MappingInvoker.ScanPrefix), BindingFlags.Public | BindingFlags.Static)!;
+    private static readonly ConstructorInfo _atlasMappingExceptionCtor =
+        typeof(AtlasMappingException).GetConstructor(new[] { typeof(string) })!;
 
     private static readonly Type _dictType = typeof(IDictionary<string, object>);
 
@@ -30,6 +33,14 @@ internal static class DynamicPlanBuilder
             return BuildDictToPocoLambda(typeMap, registry);
         else
             return BuildPocoToDictLambda(typeMap, registry);
+    }
+
+    public static LambdaExpression BuildUpdate(TypeMap typeMap, MapperRegistry registry)
+    {
+        if (DynamicShape.IsDynamicShape(typeMap.SourceType))
+            return BuildDictToPocoUpdateLambda(typeMap, registry);
+        else
+            return BuildPocoToDictUpdateLambda(typeMap, registry);
     }
 
     /// <remarks>
@@ -45,35 +56,39 @@ internal static class DynamicPlanBuilder
     /// </remarks>
     private static LambdaExpression BuildDictToPocoLambda(TypeMap typeMap, MapperRegistry registry)
     {
-        if (typeMap.DestinationType.GetConstructor(Type.EmptyTypes) is null)
-            throw new AtlasMappingException(
-                $"Dynamic dict→POCO mapping for '{typeMap.DestinationType.FullName}' requires a public " +
-                "parameterless constructor. Constructor-injection support is planned for Task 6 of the " +
-                "Atlas v2 Dynamic Mapping feature.");
+        // Route based on destination type characteristics.
+        // 1. Types with required properties: use property-init with mandatory-key checks.
+        // 2. Types with parameterless ctor (and no required props): standard property-init.
+        // 3. Everything else (records, primary-ctor classes): ctor-init path.
+        if (HasRequiredProperties(typeMap.DestinationType))
+            return BuildDictToPocoLambda_RequiredInit(typeMap, registry);
+        if (typeMap.DestinationType.GetConstructor(Type.EmptyTypes) is not null)
+            return BuildDictToPocoLambda_PropertyInit(typeMap, registry);
+        return BuildDictToPocoLambda_CtorInit(typeMap, registry);
+    }
 
+    /// <summary>
+    /// Standard property-init path: allocates via parameterless ctor then assigns each property.
+    /// Used for normal POCOs with parameterless constructors and no required properties.
+    /// </summary>
+    private static LambdaExpression BuildDictToPocoLambda_PropertyInit(TypeMap typeMap, MapperRegistry registry)
+    {
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
-
-        // Coerce src parameter to IDictionary<string, object> for uniform handling.
-        var srcAsDict = typeMap.SourceType == _dictType
-            ? (Expression)srcParam
-            : Expression.Convert(srcParam, _dictType);
+        var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
 
         var dst = Expression.Variable(typeMap.DestinationType, "dst");
         var body = new List<Expression> { Expression.Assign(dst, Expression.New(typeMap.DestinationType)) };
 
         var tryGetValue = _dictType.GetMethod(nameof(IDictionary<string, object>.TryGetValue))!;
         var registryConst = Expression.Constant(registry);
-        var cmpConst = Expression.Constant(
-            registry.ConventionOptions.CaseSensitive
-                ? StringComparison.Ordinal
-                : StringComparison.OrdinalIgnoreCase);
+        var cmpConst = BuildCmpConst(registry);
 
         foreach (var pm in typeMap.PropertyMaps)
         {
             if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
 
             var propExpr = EmitPropertyAssign(
-                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue);
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
             if (propExpr is not null)
                 body.Add(propExpr);
         }
@@ -85,7 +100,201 @@ internal static class DynamicPlanBuilder
     }
 
     /// <summary>
+    /// Required-property path: same as property-init but emits a runtime throw for required
+    /// properties whose key is missing from the source dictionary.
+    /// </summary>
+    private static LambdaExpression BuildDictToPocoLambda_RequiredInit(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
+
+        var dst = Expression.Variable(typeMap.DestinationType, "dst");
+        var body = new List<Expression> { Expression.Assign(dst, Expression.New(typeMap.DestinationType)) };
+
+        var tryGetValue = _dictType.GetMethod(nameof(IDictionary<string, object>.TryGetValue))!;
+        var registryConst = Expression.Constant(registry);
+        var cmpConst = BuildCmpConst(registry);
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
+
+            var propInfo = pm.DestinationProperty;
+            var isRequired = propInfo.GetCustomAttribute<RequiredMemberAttribute>() is not null;
+
+            if (isRequired)
+            {
+                // Emit: if (!src.TryGetValue(key, out v)) throw AtlasMappingException("'Name' is required...")
+                //       else dst.Prop = ConvertObjectTo<T>(v, ...)
+                var keyStr = pm.DynamicKey!;
+                var keyExpr = Expression.Constant(keyStr, typeof(string));
+                var valueVar = Expression.Variable(typeof(object), "v_" + keyStr);
+                var hasValue = Expression.Variable(typeof(bool), "h_" + keyStr);
+                var propType = propInfo.PropertyType;
+                var dstPropExpr = Expression.Property(dst, propInfo);
+
+                var convertCall = Expression.Call(
+                    _convertObjectTo.MakeGenericMethod(propType),
+                    valueVar, registryConst, keyExpr);
+                var assign = Expression.Assign(dstPropExpr, convertCall);
+
+                var throwExpr = Expression.Throw(
+                    Expression.New(
+                        _atlasMappingExceptionCtor,
+                        Expression.Constant($"'{keyStr}' is required but missing from source dictionary.")));
+
+                body.Add(Expression.Block(
+                    new[] { valueVar, hasValue },
+                    Expression.Assign(hasValue, Expression.Call(srcAsDict, tryGetValue, keyExpr, valueVar)),
+                    Expression.IfThenElse(hasValue, assign, throwExpr)));
+            }
+            else
+            {
+                var propExpr = EmitPropertyAssign(
+                    pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
+                if (propExpr is not null)
+                    body.Add(propExpr);
+            }
+        }
+
+        body.Add(dst);
+
+        var block = Expression.Block(new[] { dst }, body);
+        return Expression.Lambda(block, srcParam);
+    }
+
+    /// <summary>
+    /// Constructor-init path: picks the best public constructor (most parameters), maps dict
+    /// keys to ctor params, then sets any remaining init-only/settable properties.
+    /// Used for records, primary constructors, and other ctor-only types.
+    /// </summary>
+    private static LambdaExpression BuildDictToPocoLambda_CtorInit(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
+
+        var ctor = SelectBestConstructor(typeMap.DestinationType);
+        var ctorParams = ctor.GetParameters();
+
+        var tryGetValue = _dictType.GetMethod(nameof(IDictionary<string, object>.TryGetValue))!;
+        var registryConst = Expression.Constant(registry);
+        var cmpConst = BuildCmpConst(registry);
+
+        var paramVars = new ParameterExpression[ctorParams.Length];
+        var bodyStatements = new List<Expression>();
+        var allLocals = new List<ParameterExpression>();
+
+        for (int i = 0; i < ctorParams.Length; i++)
+        {
+            var p = ctorParams[i];
+            var paramVar = Expression.Variable(p.ParameterType, "p_" + p.Name);
+            paramVars[i] = paramVar;
+            allLocals.Add(paramVar);
+
+            // Use the parameter name as dict key (matches DynamicKey convention: PascalCase property name).
+            // Records use PascalCase parameter names (e.g., record Foo(int Id, string Name) → params "Id", "Name").
+            // We match case-insensitively against the TypeMap's PropertyMaps to find the DynamicKey.
+            var dynamicKey = FindDynamicKeyForCtorParam(typeMap, p.Name!);
+            var keyStr = dynamicKey ?? p.Name!;
+            var keyExpr = Expression.Constant(keyStr, typeof(string));
+            var valueVar = Expression.Variable(typeof(object), "v_" + p.Name);
+            var hasValue = Expression.Variable(typeof(bool), "h_" + p.Name);
+
+            var convertCall = Expression.Call(
+                _convertObjectTo.MakeGenericMethod(p.ParameterType),
+                valueVar, registryConst, keyExpr);
+            var assignParam = Expression.Assign(paramVar, convertCall);
+
+            Expression defaultOrThrow = p.HasDefaultValue
+                ? (Expression)Expression.Assign(paramVar,
+                    Expression.Constant(p.DefaultValue, p.ParameterType))
+                : Expression.Throw(
+                    Expression.New(
+                        _atlasMappingExceptionCtor,
+                        Expression.Constant($"'{keyStr}' is required but missing from source dictionary.")));
+
+            bodyStatements.Add(Expression.Block(
+                new[] { valueVar, hasValue },
+                Expression.Assign(hasValue, Expression.Call(srcAsDict, tryGetValue, keyExpr, valueVar)),
+                Expression.IfThenElse(hasValue, assignParam, defaultOrThrow)));
+        }
+
+        var dst = Expression.Variable(typeMap.DestinationType, "dst");
+        allLocals.Add(dst);
+        bodyStatements.Add(Expression.Assign(dst, Expression.New(ctor, paramVars.Cast<Expression>())));
+
+        // After construction, populate any init-only / settable properties NOT covered by ctor params.
+        var ctorParamNames = new HashSet<string>(
+            ctorParams.Select(p => p.Name!), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
+            // Skip if already covered by the ctor
+            if (ctorParamNames.Contains(pm.DestinationProperty.Name)) continue;
+            if (!pm.DestinationProperty.CanWrite) continue;
+
+            var propExpr = EmitPropertyAssign(
+                pm, srcAsDict, dst, registryConst, cmpConst, tryGetValue, updateInPlace: false);
+            if (propExpr is not null)
+                bodyStatements.Add(propExpr);
+        }
+
+        bodyStatements.Add(dst);
+
+        var block = Expression.Block(allLocals, bodyStatements);
+        return Expression.Lambda(block, srcParam);
+    }
+
+    /// <summary>
+    /// Update-in-place: takes the existing destination as a parameter.
+    /// Missing dict keys leave existing destination values untouched (IfThen, no else branch).
+    /// </summary>
+    private static LambdaExpression BuildDictToPocoUpdateLambda(TypeMap typeMap, MapperRegistry registry)
+    {
+        var srcParam = Expression.Parameter(typeMap.SourceType, "src");
+        var dstParam = Expression.Parameter(typeMap.DestinationType, "dst");
+        var srcAsDict = CoerceToDict(srcParam, typeMap.SourceType);
+
+        var tryGetValue = _dictType.GetMethod(nameof(IDictionary<string, object>.TryGetValue))!;
+        var registryConst = Expression.Constant(registry);
+        var cmpConst = BuildCmpConst(registry);
+
+        var statements = new List<Expression>();
+
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DynamicKey is null || pm.DestinationProperty is null) continue;
+            if (!pm.DestinationProperty.CanWrite) continue;
+
+            var propExpr = EmitPropertyAssign(
+                pm, srcAsDict, dstParam, registryConst, cmpConst, tryGetValue, updateInPlace: true);
+            if (propExpr is not null)
+                statements.Add(propExpr);
+        }
+
+        Expression body = statements.Count > 0
+            ? Expression.Block(statements)
+            : Expression.Empty();
+
+        // Null-guard: only execute body if src is not null.
+        if (typeMap.SourceType.IsClass)
+        {
+            body = Expression.IfThen(
+                Expression.Not(Expression.ReferenceEqual(srcParam, Expression.Constant(null, typeMap.SourceType))),
+                body);
+        }
+
+        return Expression.Lambda(body, srcParam, dstParam);
+    }
+
+    private static LambdaExpression BuildPocoToDictUpdateLambda(TypeMap typeMap, MapperRegistry registry)
+        => throw new NotImplementedException(
+            "POCO→Dict update-in-place codegen lands in Task 8.");
+
+    /// <summary>
     /// Emits the assignment expression for a single property.
+    /// When <paramref name="updateInPlace"/> is true, wraps in IfThen (missing key preserves existing value).
     /// Returns null if the property should be skipped.
     /// </summary>
     private static Expression? EmitPropertyAssign(
@@ -94,7 +303,8 @@ internal static class DynamicPlanBuilder
         Expression dst,
         Expression registryConst,
         Expression cmpConst,
-        MethodInfo tryGetValue)
+        MethodInfo tryGetValue,
+        bool updateInPlace)
     {
         var propInfo = pm.DestinationProperty!;
         var propType = propInfo.PropertyType;
@@ -110,10 +320,11 @@ internal static class DynamicPlanBuilder
 
         if (isPocoLike)
         {
-            // Nested POCO branch: top-level dict value or dot-notation prefix fallback
+            // Nested POCO branch
             return EmitNestedPocoAssign(
                 keyStr, keyExpr, propType, valueVar, hasValue,
-                dstPropExpr, srcAsDict, registryConst, cmpConst, tryGetValue);
+                dstPropExpr, srcAsDict, registryConst, cmpConst, tryGetValue,
+                updateInPlace);
         }
         else if (collectionElementType is not null)
         {
@@ -141,6 +352,9 @@ internal static class DynamicPlanBuilder
     /// 1. Top-level key is a nested dict   → recursive Invoke
     /// 2. Top-level key is already the POCO type → direct assign (Assert.Same)
     /// 3. No top-level key, but dot-notation prefixed keys exist → ScanPrefix + recursive Invoke
+    ///
+    /// When <paramref name="updateInPlace"/> is true, the else branch (TryGetValue miss with no
+    /// dot-notation match) is absent — existing destination value is preserved.
     /// </summary>
     private static Expression EmitNestedPocoAssign(
         string keyStr,
@@ -152,7 +366,8 @@ internal static class DynamicPlanBuilder
         Expression srcAsDict,
         Expression registryConst,
         Expression cmpConst,
-        MethodInfo tryGetValue)
+        MethodInfo tryGetValue,
+        bool updateInPlace)
     {
         // Closed Invoke<IDictionary<string, object>, TProp>
         var closedInvoke = _invokeMethod.MakeGenericMethod(_dictType, propType);
@@ -216,6 +431,8 @@ internal static class DynamicPlanBuilder
         // Else branch (TryGetValue missed): ScanPrefix dot-notation fallback
         //   var nestedDict = ScanPrefix(src, "Prop.", cmp);
         //   if (nestedDict != null) dst.Prop = Invoke(registry, nestedDict);
+        //
+        // Under update-in-place: no else branch at all — missing key preserves existing value.
         var scanCall = Expression.Call(_scanPrefix, srcAsDict, prefixExpr, cmpConst);
         var assignScanned = Expression.Assign(dstPropExpr,
             Expression.Call(closedInvoke, registryConst, nestedDictVar));
@@ -225,6 +442,17 @@ internal static class DynamicPlanBuilder
             Expression.IfThen(
                 Expression.NotEqual(nestedDictVar, Expression.Constant(null, _dictType)),
                 assignScanned));
+
+        if (updateInPlace)
+        {
+            // Under update-in-place: only do anything if TryGetValue hits OR dot-notation found.
+            // TryGetValue hit → full ifDictBranch (replaces nested).
+            // Miss → check dot-notation, but only assign if found (IfThen without else).
+            return Expression.Block(
+                new[] { valueVar, hasValue },
+                Expression.Assign(hasValue, Expression.Call(srcAsDict, tryGetValue, keyExpr, valueVar)),
+                Expression.IfThenElse(hasValue, ifDictBranch, elseBranch));
+        }
 
         return Expression.Block(
             new[] { valueVar, hasValue },
@@ -265,6 +493,57 @@ internal static class DynamicPlanBuilder
     private static LambdaExpression BuildPocoToDictLambda(TypeMap typeMap, MapperRegistry registry)
         => throw new NotImplementedException(
             "POCO→Dict codegen lands in Task 7; this branch is intentionally unreachable for Tasks 4–6.");
+
+    // ---- Helpers ----
+
+    /// <summary>Coerce source parameter to IDictionary&lt;string, object&gt; if not already that type.</summary>
+    private static Expression CoerceToDict(ParameterExpression srcParam, Type sourceType)
+        => sourceType == _dictType
+            ? (Expression)srcParam
+            : Expression.Convert(srcParam, _dictType);
+
+    private static Expression BuildCmpConst(MapperRegistry registry)
+        => Expression.Constant(
+            registry.ConventionOptions.CaseSensitive
+                ? StringComparison.Ordinal
+                : StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Returns true if the type has any public instance property decorated with RequiredMemberAttribute.</summary>
+    private static bool HasRequiredProperties(Type t)
+    {
+        foreach (var prop in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (prop.GetCustomAttribute<RequiredMemberAttribute>() is not null)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Returns the public constructor with the most parameters (for records and primary ctors).</summary>
+    private static ConstructorInfo SelectBestConstructor(Type t)
+    {
+        var ctors = t.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        if (ctors.Length == 0)
+            throw new AtlasMappingException(
+                $"Type '{t.FullName}' has no public constructors; cannot map from dynamic source.");
+        return ctors.OrderByDescending(c => c.GetParameters().Length).First();
+    }
+
+    /// <summary>
+    /// Finds the DynamicKey in TypeMap.PropertyMaps for a given constructor parameter name
+    /// (case-insensitive match against DestinationProperty.Name). Returns the DynamicKey if found,
+    /// or null (caller falls back to the raw parameter name as key).
+    /// </summary>
+    private static string? FindDynamicKeyForCtorParam(TypeMap typeMap, string paramName)
+    {
+        foreach (var pm in typeMap.PropertyMaps)
+        {
+            if (pm.DestinationProperty is not null &&
+                string.Equals(pm.DestinationProperty.Name, paramName, StringComparison.OrdinalIgnoreCase))
+                return pm.DynamicKey;
+        }
+        return null;
+    }
 
     /// <summary>
     /// Delegates to <see cref="DynamicShape.GetCollectionElementType"/> (the canonical widened version

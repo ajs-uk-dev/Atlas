@@ -253,6 +253,56 @@ public class MapperDictToPocoTests
         Assert.Equal("b", result[1].Name);
     }
 
+    [Fact]
+    public void Map_RecordConstructor_PopulatesAllParams()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var dict = new Dictionary<string, object> { ["Id"] = 42, ["Name"] = "alice" };
+        var p = mapper.Map<RecordPoco>(dict);
+        Assert.Equal(42, p.Id);
+        Assert.Equal("alice", p.Name);
+    }
+
+    [Fact]
+    public void Map_RequiredProperty_PopulatesFromDictKey()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var dict = new Dictionary<string, object> { ["Name"] = "alice" };
+        var p = mapper.Map<RequiredPoco>(dict);
+        Assert.Equal("alice", p.Name);
+    }
+
+    [Fact]
+    public void Map_RequiredProperty_ThrowsWhenKeyMissing()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var dict = new Dictionary<string, object> { };
+        var ex = Assert.Throws<AtlasMappingException>(() => mapper.Map<RequiredPoco>(dict));
+        Assert.Contains("Name", ex.Message);
+    }
+
+    [Fact]
+    public void Map_UpdateInPlace_PreservesExistingValueWhenKeyMissing()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var existing = new SimplePoco { Id = 99, Name = "preserved" };
+        var dict = new Dictionary<string, object> { ["Id"] = 42 };
+        mapper.Map(dict, existing);
+        Assert.Equal(42, existing.Id);
+        Assert.Equal("preserved", existing.Name);
+    }
+
+    [Fact]
+    public void Map_UpdateInPlace_PreservesExistingNestedPocoWhenNestedKeyMissing()
+    {
+        var mapper = new MapperConfiguration(_ => { }).CreateMapper();
+        var existing = new OrderPoco { Customer = new CustomerPoco { Name = "preserved" } };
+        var dict = new Dictionary<string, object> { };  // no "Customer" key
+        mapper.Map(dict, existing);
+        Assert.NotNull(existing.Customer);
+        Assert.Equal("preserved", existing.Customer!.Name);
+    }
+
     private sealed class SimplePoco
     {
         public int Id { get; set; }
@@ -271,4 +321,9 @@ public class MapperDictToPocoTests
     private sealed class OrderWithLinesPoco { public List<OrderLinePoco>? Lines { get; set; } }
     private sealed class TagsArrayPoco { public string[]? Tags { get; set; } }
     private sealed class IListPoco { public IList<int>? Values { get; set; } }
+    private sealed record RecordPoco(int Id, string Name);
+    private sealed class RequiredPoco
+    {
+        public required string Name { get; set; }
+    }
 }

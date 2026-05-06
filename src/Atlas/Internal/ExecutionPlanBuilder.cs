@@ -140,6 +140,10 @@ internal static class ExecutionPlanBuilder
     /// <summary>Build the update-in-place lambda for the given type map.</summary>
     public static LambdaExpression BuildUpdate(TypeMap typeMap, MapperRegistry registry)
     {
+        // Dynamic dispatch (Atlas v2 #10) — mirrors the Build() IsDynamic branch for update direction.
+        if (typeMap.IsDynamic)
+            return DynamicPlanBuilder.BuildUpdate(typeMap, registry);
+
         var srcParam = Expression.Parameter(typeMap.SourceType, "src");
         var destParam = Expression.Parameter(typeMap.DestinationType, "dest");
 
