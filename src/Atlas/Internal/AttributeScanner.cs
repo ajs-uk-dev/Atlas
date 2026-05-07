@@ -241,22 +241,6 @@ internal static class AttributeScanner
     }
 
     /// <summary>
-    /// Resolves the source-member type for a destination property by convention
-    /// (matching the property name on the source type). Returns <c>null</c> if no
-    /// matching member exists.
-    /// </summary>
-    private static Type? ResolveSourceMemberByConvention(Type srcType, PropertyInfo destProp)
-    {
-        var prop = srcType.GetProperty(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
-        if (prop is not null) return prop.PropertyType;
-
-        var field = srcType.GetField(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
-        if (field is not null) return field.FieldType;
-
-        return null;
-    }
-
-    /// <summary>
     /// Builds a <c>Func&lt;TSrc, TMember&gt;</c> lambda for the convention-matched source member
     /// (simple name-equality, no path walking). Returns <c>null</c> if no member is found.
     /// </summary>
