@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 namespace Atlas.Internal;
 
@@ -10,6 +11,14 @@ namespace Atlas.Internal;
 /// </summary>
 internal static class AttributeScanner
 {
+    private static readonly MethodInfo CreateMapOpenMethodInfo =
+        typeof(MapperConfigurationExpression)
+            .GetMethods()
+            .Single(m => m.Name == nameof(MapperConfigurationExpression.CreateMap)
+                      && m.IsGenericMethodDefinition
+                      && m.GetParameters().Length == 1
+                      && m.GetParameters()[0].ParameterType == typeof(MemberList));
+
     /// <summary>
     /// Top-level entry point. Enumerates public top-level non-abstract decorated types and
     /// processes each. Errors are accumulated; a fatal duplicate-pair throws immediately.
@@ -57,7 +66,63 @@ internal static class AttributeScanner
         if (!ValidateAutoMapTarget(decoratedType, attr, errors))
             return;
 
-        // CreateMap + member attribute application + class-level flags lands in Tasks 5/6/7/8.
+        var srcType = attr.SourceType;
+        var mappingExpression = InvokeCreateMap(cfg, srcType, decoratedType, attr.MemberList);
+        SetRegistrationOrigin(cfg, srcType, decoratedType);
+
+        // Member-level attribute application lands in Tasks 6/7/8.
+        // ApplyMemberAttributes(mappingExpression, srcType, decoratedType, errors);
+
+        ApplyClassLevelFlags(mappingExpression, srcType, decoratedType, attr);
+    }
+
+    private static object InvokeCreateMap(MapperConfigurationExpression cfg, Type srcType, Type dstType, MemberList memberList)
+    {
+        var createMapClosed = CreateMapOpenMethodInfo.MakeGenericMethod(srcType, dstType);
+        try
+        {
+            return createMapClosed.Invoke(cfg, [memberList])!;
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is AtlasConfigurationException acex)
+        {
+            // Universal duplicate-pair rule (Task 9) fired. Unwrap so the user sees the proper exception type.
+            ExceptionDispatchInfo.Capture(acex).Throw();
+            throw; // unreachable
+        }
+    }
+
+    /// <summary>
+    /// Sets <see cref="TypeMap.RegistrationOrigin"/> on the just-created TypeMap so error messages
+    /// for duplicate-pair conflicts cite the attribute source rather than a synthesized fluent call.
+    /// </summary>
+    private static void SetRegistrationOrigin(MapperConfigurationExpression cfg, Type srcType, Type dstType)
+    {
+        var tm = cfg.GetTypeMaps().FirstOrDefault(t => t.SourceType == srcType && t.DestinationType == dstType);
+        if (tm is not null)
+        {
+            tm.RegistrationOrigin = $"[AutoMap(typeof({srcType.Name}))] on {dstType.Name}";
+        }
+    }
+
+    private static void ApplyClassLevelFlags(object mappingExpression, Type srcType, Type dstType, AutoMapAttribute attr)
+    {
+        var imappingExprClosed = typeof(Atlas.Configuration.IMappingExpression<,>).MakeGenericType(srcType, dstType);
+
+        if (attr.PreserveReferences)
+        {
+            var method = imappingExprClosed.GetMethod(
+                nameof(Atlas.Configuration.IMappingExpression<object, object>.PreserveReferences),
+                Type.EmptyTypes)!;
+            method.Invoke(mappingExpression, null);
+        }
+
+        if (attr.ReverseMap)
+        {
+            var method = imappingExprClosed.GetMethod(
+                nameof(Atlas.Configuration.IMappingExpression<object, object>.ReverseMap),
+                [typeof(MemberList)])!;
+            method.Invoke(mappingExpression, [MemberList.None]);
+        }
     }
 
     /// <summary>

@@ -56,3 +56,72 @@ public class AutoMapAttributeTests
         Assert.True(typeof(AutoMapAttribute).IsSealed);
     }
 }
+
+public class AutoMapAttributeBehaviorTests
+{
+    [Fact]
+    public void AttributeMap_RegistrationOrigin_NamesAttribute()
+    {
+        var expr = new MapperConfigurationExpression();
+        try { Atlas.Internal.AttributeScanner.Discover(typeof(Task5_MinimumDto).Assembly, expr); }
+        catch (AtlasConfigurationException) { /* expected — caused by Task 3 bad fixtures, irrelevant to this test */ }
+        var tm = expr.GetTypeMaps()
+                     .First(t => t.SourceType == typeof(Task5_MinimumSource)
+                              && t.DestinationType == typeof(Task5_MinimumDto));
+        Assert.Contains("[AutoMap", tm.RegistrationOrigin);
+        Assert.Contains(nameof(Task5_MinimumDto), tm.RegistrationOrigin);
+    }
+
+    [Fact]
+    public void AttributeMap_PreserveReferencesTrue_FlagPropagated()
+    {
+        var expr = new MapperConfigurationExpression();
+        try { Atlas.Internal.AttributeScanner.Discover(typeof(Task5_PreserveDto).Assembly, expr); }
+        catch (AtlasConfigurationException) { /* expected — caused by Task 3 bad fixtures, irrelevant to this test */ }
+        var tm = expr.GetTypeMaps()
+                     .First(t => t.DestinationType == typeof(Task5_PreserveDto));
+        Assert.True(tm.PreserveReferences);
+    }
+
+    [Fact]
+    public void AttributeMap_ReverseMapTrue_ReversePairRegistered()
+    {
+        var expr = new MapperConfigurationExpression();
+        try { Atlas.Internal.AttributeScanner.Discover(typeof(Task5_ReverseDto).Assembly, expr); }
+        catch (AtlasConfigurationException) { /* expected — caused by Task 3 bad fixtures, irrelevant to this test */ }
+        Assert.Contains(expr.GetTypeMaps(), t =>
+            t.SourceType == typeof(Task5_ReverseDto) && t.DestinationType == typeof(Task5_ReverseSource));
+        Assert.Contains(expr.GetTypeMaps(), t =>
+            t.SourceType == typeof(Task5_ReverseSource) && t.DestinationType == typeof(Task5_ReverseDto));
+    }
+
+    [Fact]
+    public void AttributeMap_PreserveReferencesAndReverseMap_FlagPropagatesToReversePair()
+    {
+        var expr = new MapperConfigurationExpression();
+        try { Atlas.Internal.AttributeScanner.Discover(typeof(Task5_PreserveReverseDto).Assembly, expr); }
+        catch (AtlasConfigurationException) { /* expected — caused by Task 3 bad fixtures, irrelevant to this test */ }
+        var fwd = expr.GetTypeMaps()
+                      .First(t => t.SourceType == typeof(Task5_PreserveReverseSource));
+        var rev = expr.GetTypeMaps()
+                      .First(t => t.DestinationType == typeof(Task5_PreserveReverseSource));
+        Assert.True(fwd.PreserveReferences);
+        Assert.True(rev.PreserveReferences);
+    }
+}
+
+public class Task5_MinimumSource { public int Id { get; set; } }
+[AutoMap(typeof(Task5_MinimumSource))]
+public class Task5_MinimumDto { public int Id { get; set; } }
+
+public class Task5_PreserveSource { public int Id { get; set; } }
+[AutoMap(typeof(Task5_PreserveSource), PreserveReferences = true)]
+public class Task5_PreserveDto { public int Id { get; set; } }
+
+public class Task5_ReverseSource { public int Id { get; set; } }
+[AutoMap(typeof(Task5_ReverseSource), ReverseMap = true)]
+public class Task5_ReverseDto { public int Id { get; set; } }
+
+public class Task5_PreserveReverseSource { public int Id { get; set; } }
+[AutoMap(typeof(Task5_PreserveReverseSource), PreserveReferences = true, ReverseMap = true)]
+public class Task5_PreserveReverseDto { public int Id { get; set; } }
