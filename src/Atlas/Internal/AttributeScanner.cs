@@ -19,6 +19,9 @@ internal static class AttributeScanner
                       && m.GetParameters().Length == 1
                       && m.GetParameters()[0].ParameterType == typeof(MemberList));
 
+    private const string IgnoreMethodName =
+        nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.Ignore);
+
     /// <summary>
     /// Top-level entry point. Enumerates public top-level non-abstract decorated types and
     /// processes each. Errors are accumulated; a fatal duplicate-pair throws immediately.
@@ -70,8 +73,7 @@ internal static class AttributeScanner
         var mappingExpression = InvokeCreateMap(cfg, srcType, decoratedType, attr.MemberList);
         SetRegistrationOrigin(cfg, srcType, decoratedType);
 
-        // Member-level attribute application lands in Tasks 6/7/8.
-        // ApplyMemberAttributes(mappingExpression, srcType, decoratedType, errors);
+        ApplyMemberAttributes(mappingExpression, srcType, decoratedType, errors);
 
         ApplyClassLevelFlags(mappingExpression, srcType, decoratedType, attr);
     }
@@ -101,6 +103,71 @@ internal static class AttributeScanner
         if (tm is not null)
         {
             tm.RegistrationOrigin = $"[AutoMap(typeof({srcType.Name}))] on {dstType.Name}";
+        }
+    }
+
+    /// <summary>
+    /// Iterates destination properties and applies [Ignore] / [SourceMember] / [NullSubstitute]
+    /// per-property via reflection-built ForMember invocations. See design §5.4.
+    /// Task 6: handles [Ignore] only. [SourceMember] lands in Task 7; [NullSubstitute] in Task 8.
+    /// </summary>
+    private static void ApplyMemberAttributes(object mappingExpression, Type srcType, Type dstType, List<ConfigurationError> errors)
+    {
+        var imappingExprClosed = typeof(Atlas.Configuration.IMappingExpression<,>).MakeGenericType(srcType, dstType);
+        var forMemberOpen = imappingExprClosed.GetMethods()
+            .Single(m => m.Name == nameof(Atlas.Configuration.IMappingExpression<object, object>.ForMember)
+                      && m.IsGenericMethodDefinition);
+
+        foreach (var prop in dstType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var ignore = prop.GetCustomAttribute<IgnoreAttribute>(inherit: false);
+            var sourceMember = prop.GetCustomAttribute<SourceMemberAttribute>(inherit: false);
+            var nullSubstitute = prop.GetCustomAttribute<NullSubstituteAttribute>(inherit: false);
+
+            if (ignore is null && sourceMember is null && nullSubstitute is null)
+                continue;
+
+            var memberType = prop.PropertyType;
+            var imemberConfigClosed = typeof(Atlas.Configuration.IMemberConfigurationExpression<,,>)
+                .MakeGenericType(srcType, dstType, memberType);
+            var optParam = Expression.Parameter(imemberConfigClosed, "opt");
+
+            var statements = new List<Expression>();
+
+            if (ignore is not null)
+            {
+                // [Ignore] short-circuits — emit only Ignore() and ignore other attributes on this property.
+                var ignoreMethod = imemberConfigClosed.GetMethod(IgnoreMethodName, Type.EmptyTypes)!;
+                statements.Add(Expression.Call(optParam, ignoreMethod));
+            }
+            else
+            {
+                // [SourceMember] handling lands in Task 7.
+                // [NullSubstitute] handling lands in Task 8.
+            }
+
+            if (statements.Count == 0)
+                continue;
+
+            var body = statements.Count == 1 ? statements[0] : (Expression)Expression.Block(statements);
+            var actionType = typeof(Action<>).MakeGenericType(imemberConfigClosed);
+            var optionsCallback = Expression.Lambda(actionType, body, optParam).Compile();
+
+            // Build d => d.X selector
+            var dstParam = Expression.Parameter(dstType, "d");
+            var memberAccess = Expression.Property(dstParam, prop);
+            var funcType = typeof(Func<,>).MakeGenericType(dstType, memberType);
+            var selector = Expression.Lambda(funcType, memberAccess, dstParam);
+
+            var forMemberClosed = forMemberOpen.MakeGenericMethod(memberType);
+            try
+            {
+                forMemberClosed.Invoke(mappingExpression, [selector, optionsCallback]);
+            }
+            catch (TargetInvocationException tie) when (tie.InnerException is AtlasConfigurationException acex)
+            {
+                ExceptionDispatchInfo.Capture(acex).Throw();
+            }
         }
     }
 
