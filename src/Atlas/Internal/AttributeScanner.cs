@@ -25,6 +25,9 @@ internal static class AttributeScanner
     private const string MapFromMethodName =
         nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.MapFrom);
 
+    private const string NullSubstituteMethodName =
+        nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.NullSubstitute);
+
     /// <summary>
     /// Top-level entry point. Enumerates public top-level non-abstract decorated types and
     /// processes each. Errors are accumulated; a fatal duplicate-pair throws immediately.
@@ -165,7 +168,51 @@ internal static class AttributeScanner
                     }
                 }
 
-                // [NullSubstitute] handling lands in Task 8.
+                if (nullSubstitute is not null)
+                {
+                    // Resolve TSourceMember: use SourceMember leaf if present, else convention-resolve.
+                    Type? resolvedSourceType = sourceMemberType;
+                    LambdaExpression? conventionSourceLambda = null;
+                    if (resolvedSourceType is null)
+                    {
+                        conventionSourceLambda = BuildConventionSourcePathExpression(srcType, prop);
+                        resolvedSourceType = conventionSourceLambda?.ReturnType;
+                    }
+
+                    if (resolvedSourceType is not null
+                        && ValidateNullSubstituteCompatibility(resolvedSourceType, nullSubstitute.ConstantValue,
+                                                               srcType, dstType, prop.Name, errors))
+                    {
+                        // If no [SourceMember] was present, emit MapFrom with the convention-resolved path
+                        // so the property map has a source expression. Without this, the convention engine
+                        // would skip the property (already in existingNames) leaving SourcePath = null,
+                        // and ExecutionPlanBuilder would skip the assignment entirely.
+                        if (conventionSourceLambda is not null)
+                        {
+                            var mapFromOpen = imemberConfigClosed.GetMethods()
+                                .Single(m => m.Name == MapFromMethodName
+                                          && m.IsGenericMethodDefinition
+                                          && m.GetParameters().Length == 1
+                                          && m.GetParameters()[0].ParameterType.IsGenericType
+                                          && m.GetParameters()[0].ParameterType.GetGenericTypeDefinition() == typeof(Expression<>));
+                            var mapFromClosed = mapFromOpen.MakeGenericMethod(resolvedSourceType);
+                            statements.Add(Expression.Call(optParam, mapFromClosed,
+                                Expression.Constant(conventionSourceLambda, conventionSourceLambda.GetType())));
+                        }
+
+                        var constantOverloadOpen = imemberConfigClosed.GetMethods()
+                            .Single(m => m.Name == NullSubstituteMethodName
+                                      && m.IsGenericMethodDefinition
+                                      && m.GetParameters().Length == 1
+                                      && !m.GetParameters()[0].ParameterType.IsGenericType);
+                        var constantOverloadClosed = constantOverloadOpen.MakeGenericMethod(resolvedSourceType);
+
+                        // Convert the boxed attribute constant to the resolved source type for type-correct emit.
+                        var convertedConstant = ConvertAttributeConstant(nullSubstitute.ConstantValue, resolvedSourceType);
+                        statements.Add(Expression.Call(optParam, constantOverloadClosed,
+                            Expression.Constant(convertedConstant, resolvedSourceType)));
+                    }
+                }
             }
 
             if (statements.Count == 0)
@@ -191,6 +238,116 @@ internal static class AttributeScanner
                 ExceptionDispatchInfo.Capture(acex).Throw();
             }
         }
+    }
+
+    /// <summary>
+    /// Resolves the source-member type for a destination property by convention
+    /// (matching the property name on the source type). Returns <c>null</c> if no
+    /// matching member exists.
+    /// </summary>
+    private static Type? ResolveSourceMemberByConvention(Type srcType, PropertyInfo destProp)
+    {
+        var prop = srcType.GetProperty(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
+        if (prop is not null) return prop.PropertyType;
+
+        var field = srcType.GetField(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
+        if (field is not null) return field.FieldType;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Builds a <c>Func&lt;TSrc, TMember&gt;</c> lambda for the convention-matched source member
+    /// (simple name-equality, no path walking). Returns <c>null</c> if no member is found.
+    /// </summary>
+    private static LambdaExpression? BuildConventionSourcePathExpression(Type srcType, PropertyInfo destProp)
+    {
+        var srcParam = Expression.Parameter(srcType, "s");
+
+        var srcProp = srcType.GetProperty(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
+        if (srcProp is not null && srcProp.CanRead)
+        {
+            var memberAccess = Expression.Property(srcParam, srcProp);
+            var funcType = typeof(Func<,>).MakeGenericType(srcType, srcProp.PropertyType);
+            return Expression.Lambda(funcType, memberAccess, srcParam);
+        }
+
+        var srcField = srcType.GetField(destProp.Name, BindingFlags.Public | BindingFlags.Instance);
+        if (srcField is not null)
+        {
+            var memberAccess = Expression.Field(srcParam, srcField);
+            var funcType = typeof(Func<,>).MakeGenericType(srcType, srcField.FieldType);
+            return Expression.Lambda(funcType, memberAccess, srcParam);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Eager validator for [NullSubstitute] per design §6 rules 5 &amp; 6. Returns true
+    /// if the substitute is compatible; appends a structured error and returns false
+    /// otherwise.
+    /// </summary>
+    private static bool ValidateNullSubstituteCompatibility(
+        Type sourceMemberType, object constantValue,
+        Type srcType, Type dstType, string destMemberName,
+        List<ConfigurationError> errors)
+    {
+        // Rule 6: source must be reference type or Nullable<T>.
+        var underlying = Nullable.GetUnderlyingType(sourceMemberType);
+        var isReferenceType = !sourceMemberType.IsValueType;
+        var isNullable = underlying is not null;
+
+        if (!isReferenceType && !isNullable)
+        {
+            errors.Add(new(srcType, dstType, destMemberName,
+                $"[NullSubstitute({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
+                $"source-member type '{sourceMemberType.Name}' is non-nullable; the substitute is unreachable. " +
+                $"Use a different default mechanism or remove the attribute."));
+            return false;
+        }
+
+        // Rule 5: substitute must be assignable to source-member type (or its underlying type for Nullable<T>).
+        var targetType = underlying ?? sourceMemberType;
+        var constantType = constantValue.GetType();
+
+        if (!targetType.IsAssignableFrom(constantType))
+        {
+            // Allow numeric coercion (matches existing fluent NullSubstitute behavior).
+            if (!IsNumericallyCoercible(constantType, targetType))
+            {
+                errors.Add(new(srcType, dstType, destMemberName,
+                    $"[NullSubstitute({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
+                    $"substitute type '{constantType.Name}' is not assignable to source-member type " +
+                    $"'{(isNullable ? $"Nullable<{targetType.Name}>" : targetType.Name)}'."));
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsNumericallyCoercible(Type from, Type to)
+    {
+        return Atlas.Internal.NumericConversions.HasImplicitConversion(from, to);
+    }
+
+    private static object ConvertAttributeConstant(object value, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (underlying.IsAssignableFrom(value.GetType())) return value;
+        return Convert.ChangeType(value, underlying);
+    }
+
+    private static string FormatConstant(object? value)
+    {
+        return value switch
+        {
+            string s => $"\"{s}\"",
+            char c => $"'{c}'",
+            null => "null",
+            _ => value.ToString() ?? "?"
+        };
     }
 
     private static void ApplyClassLevelFlags(object mappingExpression, Type srcType, Type dstType, AutoMapAttribute attr)
