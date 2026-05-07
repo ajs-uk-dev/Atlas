@@ -171,6 +171,10 @@ public sealed class MapperConfigurationExpression
                 _openGenericMaps.Add(openMap);
             }
         }
+        foreach (var asm in assemblies.Distinct())
+        {
+            AttributeScanner.Discover(asm, this);
+        }
     }
 
     /// <summary>Read-only snapshot of registered type-maps. Used by tests and by MapperConfiguration.</summary>

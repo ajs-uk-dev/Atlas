@@ -76,8 +76,24 @@ internal static class AttributeScanner
             return;
 
         var srcType = attr.SourceType;
+        var attributeOrigin = $"[AutoMap(typeof({srcType.Name}))] on {decoratedType.Name}";
+
+        // Check for duplicate before calling CreateMap so the conflict error names the
+        // attribute as the incoming (new) registration origin — not a synthesised CreateMap<> call.
+        // Accumulate (not immediate throw) so all other types in the scan complete first.
+        var existing = cfg.GetTypeMaps()
+            .FirstOrDefault(t => t.SourceType == srcType && t.DestinationType == decoratedType);
+        if (existing is not null)
+        {
+            errors.Add(new(srcType, decoratedType, "(register)",
+                $"Type pair ({srcType.Name}, {decoratedType.Name}) is registered twice: " +
+                $"{existing.RegistrationOrigin} and {attributeOrigin}. " +
+                $"Pick one — every (TSource, TDestination) pair must have a single registration."));
+            return;
+        }
+
         var mappingExpression = InvokeCreateMap(cfg, srcType, decoratedType, attr.MemberList);
-        SetRegistrationOrigin(cfg, srcType, decoratedType);
+        SetRegistrationOrigin(cfg, srcType, decoratedType, attributeOrigin);
 
         ApplyMemberAttributes(mappingExpression, srcType, decoratedType, errors);
 
@@ -103,12 +119,12 @@ internal static class AttributeScanner
     /// Sets <see cref="TypeMap.RegistrationOrigin"/> on the just-created TypeMap so error messages
     /// for duplicate-pair conflicts cite the attribute source rather than a synthesized fluent call.
     /// </summary>
-    private static void SetRegistrationOrigin(MapperConfigurationExpression cfg, Type srcType, Type dstType)
+    private static void SetRegistrationOrigin(MapperConfigurationExpression cfg, Type srcType, Type dstType, string origin)
     {
         var tm = cfg.GetTypeMaps().FirstOrDefault(t => t.SourceType == srcType && t.DestinationType == dstType);
         if (tm is not null)
         {
-            tm.RegistrationOrigin = $"[AutoMap(typeof({srcType.Name}))] on {dstType.Name}";
+            tm.RegistrationOrigin = origin;
         }
     }
 
