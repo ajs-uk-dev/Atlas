@@ -482,6 +482,8 @@ Previous v1 behavior on duplicate non-reverse `CreateMap` calls was silent last-
 
 Suggested migration: run existing tests against the new version. If any throw `AtlasConfigurationException` mentioning duplicate registration, the test exposed a latent configuration bug — pick one of the two registration sites and remove the other. The error message names both registration origins so the offending duplicate is easy to find.
 
+Note: this also makes calling `cfg.AddMaps(asm)` twice with the same assembly (which was previously idempotent in v1) a duplicate-registration error in v2. Call `AddMaps` exactly once per assembly per configuration.
+
 ## Reference handling for cycles
 
 Atlas can map graphs with cycles or shared references safely, opt-in per typemap.

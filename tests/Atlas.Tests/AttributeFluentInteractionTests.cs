@@ -129,6 +129,27 @@ public class AttributeFluentInteractionTests
         Assert.True(fluentIdx < attributeIdx,
             $"Profile origin should precede attribute origin. Got: {error.Reason}");
     }
+
+    [Fact]
+    public void AttributeReverseMap_CollidesWithExplicitReversePair_ThrowsAtlasConfigException()
+    {
+        // Profile declares the reverse pair (D_Holistic, S_Holistic) explicitly via fluent.
+        // Attribute on D_Holistic declares [AutoMap(typeof(S_Holistic), ReverseMap = true)],
+        // which forces the scanner to emit .ReverseMap() that creates (D_Holistic, S_Holistic)
+        // — collides with the explicit profile registration.
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            new MapperConfiguration(c =>
+            {
+                c.AddProfile(new AttributeFluentInteractionFixtures.HolisticReverseConflictProfile());
+                c.AddMaps(typeof(D_Holistic).Assembly);
+            });
+        });
+        // CRITICAL: verify the user sees AtlasConfigurationException, NOT TargetInvocationException.
+        // (Before the fix, the reflection invoke would leak a TIE wrapping the AtlasConfigurationException.)
+        Assert.IsType<AtlasConfigurationException>(ex);
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("registered twice"));
+    }
 }
 
 public class InteractionSrcA { public int Id { get; set; } }
@@ -158,8 +179,22 @@ public class AttributeFluentInteractionFixtures
             ValueTransformers.Add<string>(s => s + "?");
         }
     }
+
+    // Nested so ProfileScanner skips it — only loaded explicitly via AddProfile in the test.
+    public class HolisticReverseConflictProfile : MapperProfile
+    {
+        public HolisticReverseConflictProfile()
+        {
+            // Explicit reverse pair (D_Holistic, S_Holistic) — collides with what AutoMap+ReverseMap produces.
+            CreateMap<D_Holistic, S_Holistic>();
+        }
+    }
 }
 
 public class InteractionGlobalTransformerSource { public string Name { get; set; } = ""; }
 [AutoMap(typeof(InteractionGlobalTransformerSource))]
 public class InteractionGlobalTransformerDto { public string Name { get; set; } = ""; }
+
+public class S_Holistic { public int X { get; set; } }
+[AutoMap(typeof(S_Holistic), ReverseMap = true)]
+public class D_Holistic { public int X { get; set; } }

@@ -103,13 +103,25 @@ internal static class AttributeScanner
     private static object InvokeCreateMap(MapperConfigurationExpression cfg, Type srcType, Type dstType, MemberList memberList)
     {
         var createMapClosed = CreateMapOpenMethodInfo.MakeGenericMethod(srcType, dstType);
+        return InvokeAndUnwrap(createMapClosed, cfg, [memberList])!;
+    }
+
+    /// <summary>
+    /// Invokes <paramref name="method"/> via reflection and unwraps any
+    /// <see cref="TargetInvocationException"/> that wraps an <see cref="AtlasConfigurationException"/>,
+    /// re-throwing the inner exception with its original stack trace preserved.
+    /// All four reflection-invoke sites in this class route through this helper so that
+    /// callers always see a clean <see cref="AtlasConfigurationException"/> rather than a
+    /// <see cref="TargetInvocationException"/> wrapper.
+    /// </summary>
+    private static object? InvokeAndUnwrap(MethodInfo method, object target, object?[]? args)
+    {
         try
         {
-            return createMapClosed.Invoke(cfg, [memberList])!;
+            return method.Invoke(target, args);
         }
         catch (TargetInvocationException tie) when (tie.InnerException is AtlasConfigurationException acex)
         {
-            // Universal duplicate-pair rule (Task 9) fired. Unwrap so the user sees the proper exception type.
             ExceptionDispatchInfo.Capture(acex).Throw();
             throw; // unreachable
         }
@@ -245,14 +257,7 @@ internal static class AttributeScanner
             var selector = Expression.Lambda(funcType, memberAccess, dstParam);
 
             var forMemberClosed = forMemberOpen.MakeGenericMethod(memberType);
-            try
-            {
-                forMemberClosed.Invoke(mappingExpression, [selector, optionsCallback]);
-            }
-            catch (TargetInvocationException tie) when (tie.InnerException is AtlasConfigurationException acex)
-            {
-                ExceptionDispatchInfo.Capture(acex).Throw();
-            }
+            InvokeAndUnwrap(forMemberClosed, mappingExpression, [selector, optionsCallback]);
         }
     }
 
@@ -359,7 +364,7 @@ internal static class AttributeScanner
             var method = imappingExprClosed.GetMethod(
                 nameof(Atlas.Configuration.IMappingExpression<object, object>.PreserveReferences),
                 Type.EmptyTypes)!;
-            method.Invoke(mappingExpression, null);
+            InvokeAndUnwrap(method, mappingExpression, null);
         }
 
         if (attr.ReverseMap)
@@ -367,7 +372,7 @@ internal static class AttributeScanner
             var method = imappingExprClosed.GetMethod(
                 nameof(Atlas.Configuration.IMappingExpression<object, object>.ReverseMap),
                 [typeof(MemberList)])!;
-            method.Invoke(mappingExpression, [MemberList.None]);
+            InvokeAndUnwrap(method, mappingExpression, [MemberList.None]);
         }
     }
 
