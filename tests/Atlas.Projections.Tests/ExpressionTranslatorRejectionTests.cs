@@ -69,3 +69,29 @@ public class UEDS_RejectDtoHooks { public int Id { get; set; } }
 
 public class UEDS_RejectSrcPR { public int Id { get; set; } public UEDS_RejectSrcPR? Self { get; set; } }
 public class UEDS_RejectDtoPR { public int Id { get; set; } public UEDS_RejectDtoPR? Self { get; set; } }
+
+public class ExpressionTranslatorMemberRejectionTests
+{
+    [Fact]
+    public void MemberNotFound_ThrowsAtlasProjectionException()
+    {
+        // Configure a map but reference a destination member that doesn't have a PropertyMap.
+        // The simplest case: a destination DTO whose property Atlas's convention engine
+        // can't resolve to the source — declare an extra DTO property no source has.
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<UEDS_MissingMemberSrc, UEDS_MissingMemberDto>(MemberList.None));
+        Expression<Func<UEDS_MissingMemberDto, bool>> predicate = d => d.PhantomMember == "x";
+
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ExpressionTranslator.Translate(
+                cfg.Internal_Registry,
+                new TypePair(typeof(UEDS_MissingMemberSrc), typeof(UEDS_MissingMemberDto)),
+                predicate));
+
+        Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("PhantomMember")
+                                          && d.Reason.Contains("no PropertyMap"));
+    }
+}
+
+public class UEDS_MissingMemberSrc { public int Id { get; set; } }
+public class UEDS_MissingMemberDto { public int Id { get; set; } public string PhantomMember { get; set; } = ""; }
