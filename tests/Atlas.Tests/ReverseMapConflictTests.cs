@@ -77,9 +77,9 @@ public class ReverseMapConflictTests
 
         // Under the universal duplicate-pair rule the collision fires on the forward (S, D) pair
         // when the second ProfileB tries to register CreateMap<S, D> again, before the reverse
-        // step runs. Verify the throw names the type pair.
-        Assert.Contains("S", ex.Message);
-        Assert.Contains("D", ex.Message);
+        // step runs. Verify the throw names the type pair and uses stable wording.
+        Assert.Contains("registered twice", ex.Message);
+        Assert.Contains("CreateMap<S, D>()", ex.Message);
     }
 
     [Fact]
