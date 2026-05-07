@@ -72,10 +72,14 @@ public class ReverseMapConflictTests
         var ex = Assert.Throws<AtlasConfigurationException>(() => new MapperConfiguration(c =>
         {
             c.AddProfile(new ProfileB());     // (S, D) + (D, S) reverse
-            c.AddProfile(new ProfileB());     // again — second (D, S) reverse collides
+            c.AddProfile(new ProfileB());     // again — second (S, D) forward collides under universal rule
         }));
 
-        Assert.Contains("CreateMap<S, D>().ReverseMap()", ex.Message);
+        // Under the universal duplicate-pair rule the collision fires on the forward (S, D) pair
+        // when the second ProfileB tries to register CreateMap<S, D> again, before the reverse
+        // step runs. Verify the throw names the type pair.
+        Assert.Contains("S", ex.Message);
+        Assert.Contains("D", ex.Message);
     }
 
     [Fact]

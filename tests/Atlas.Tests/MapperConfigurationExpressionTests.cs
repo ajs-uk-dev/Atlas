@@ -18,15 +18,14 @@ public class MapperConfigurationExpressionTests
     }
 
     [Fact]
-    public void CreateMap_Twice_ReplacesPreviousMap()
+    public void CreateMap_Twice_SamePair_Throws()
     {
-        var expr = new MapperConfigurationExpression();
-        expr.CreateMap<SrcA, DstA>();
-        expr.CreateMap<SrcA, DstA>(MemberList.None);
-
-        var maps = expr.GetTypeMaps();
-        Assert.Single(maps);
-        Assert.Equal(MemberList.None, maps[0].MemberList);
+        Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<SrcA, DstA>();
+            expr.CreateMap<SrcA, DstA>(MemberList.None);
+        });
     }
 
     [Fact]
@@ -117,5 +116,35 @@ public class RecordingProfile : MapperProfile
     {
         WasConstructed = true;
         CreateMap<SrcA, DstA>();
+    }
+}
+
+public class DuplicatePairTests
+{
+    public class DupSrc { public int X { get; set; } }
+    public class DupDst { public int X { get; set; } }
+
+    [Fact]
+    public void TwoFluentCreateMapCalls_SamePair_Throws()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<DupSrc, DupDst>();
+            expr.CreateMap<DupSrc, DupDst>();
+        });
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("registered twice"));
+    }
+
+    [Fact]
+    public void DuplicateMessage_NamesBothOrigins()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<DupSrc, DupDst>();
+            expr.CreateMap<DupSrc, DupDst>();
+        });
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("CreateMap<DupSrc, DupDst>()"));
     }
 }
