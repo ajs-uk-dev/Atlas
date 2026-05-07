@@ -116,19 +116,13 @@ public sealed class MapperConfigurationExpression
     {
         if (_typeMaps.TryGetValue(newTm.Pair, out var existing))
         {
-            var existingIsReverse = existing.ReverseMapPair is not null;
-            var newIsReverse = newTm.ReverseMapPair is not null;
-            if (existingIsReverse || newIsReverse)
+            throw new AtlasConfigurationException(new List<ConfigurationError>
             {
-                throw new AtlasConfigurationException(new List<ConfigurationError>
-                {
-                    new(newTm.SourceType, newTm.DestinationType, "(register)",
-                        $"Type pair ({newTm.SourceType.Name}, {newTm.DestinationType.Name}) is registered twice: " +
-                        $"{existing.RegistrationOrigin} and {newTm.RegistrationOrigin}. " +
-                        $"Pick one — either remove the duplicate, or rely solely on .ReverseMap() to produce the inverse.")
-                });
-            }
-            // Otherwise: preserve v1 last-write-wins behavior (silent overwrite).
+                new(newTm.SourceType, newTm.DestinationType, "(register)",
+                    $"Type pair ({newTm.SourceType.Name}, {newTm.DestinationType.Name}) is registered twice: " +
+                    $"{existing.RegistrationOrigin} and {newTm.RegistrationOrigin}. " +
+                    $"Pick one — every (TSource, TDestination) pair must have a single registration.")
+            });
         }
         _typeMaps[newTm.Pair] = newTm;
     }
@@ -176,6 +170,10 @@ public sealed class MapperConfigurationExpression
             {
                 _openGenericMaps.Add(openMap);
             }
+        }
+        foreach (var asm in assemblies.Distinct())
+        {
+            AttributeScanner.Discover(asm, this);
         }
     }
 

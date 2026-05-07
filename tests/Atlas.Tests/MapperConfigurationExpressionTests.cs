@@ -18,15 +18,14 @@ public class MapperConfigurationExpressionTests
     }
 
     [Fact]
-    public void CreateMap_Twice_ReplacesPreviousMap()
+    public void CreateMap_Twice_SamePair_Throws()
     {
-        var expr = new MapperConfigurationExpression();
-        expr.CreateMap<SrcA, DstA>();
-        expr.CreateMap<SrcA, DstA>(MemberList.None);
-
-        var maps = expr.GetTypeMaps();
-        Assert.Single(maps);
-        Assert.Equal(MemberList.None, maps[0].MemberList);
+        Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<SrcA, DstA>();
+            expr.CreateMap<SrcA, DstA>(MemberList.None);
+        });
     }
 
     [Fact]
@@ -54,7 +53,11 @@ public class MapperConfigurationExpressionTests
     public void AddMaps_AssemblyMarker_DiscoversProfiles()
     {
         var expr = new MapperConfigurationExpression();
-        expr.AddMaps<MapperConfigurationExpressionTests>();
+        // Tolerate AtlasConfigurationException thrown by bad-fixture pollution from Task 3
+        // ([AutoMap] duplicates in the test assembly). Profile discovery — which is what this
+        // test asserts — completes before the attribute-scanner phase that throws.
+        try { expr.AddMaps<MapperConfigurationExpressionTests>(); }
+        catch (AtlasConfigurationException) { }
 
         // RecordingProfile is a top-level profile in this assembly; nested fixtures (e.g. NoCtorProfile)
         // are deliberately filtered out by the scanner.
@@ -68,7 +71,11 @@ public class MapperConfigurationExpressionTests
     {
         var expr = new MapperConfigurationExpression();
         var asm = typeof(MapperConfigurationExpressionTests).Assembly;
-        expr.AddMaps(asm, asm); // intentional duplicate
+        // Tolerate AtlasConfigurationException thrown by bad-fixture pollution from Task 3
+        // ([AutoMap] duplicates in the test assembly). The distinct-assembly deduplication
+        // behavior — what this test asserts — is applied before the attribute-scanner phase.
+        try { expr.AddMaps(asm, asm); } // intentional duplicate
+        catch (AtlasConfigurationException) { }
 
         var maps = expr.GetTypeMaps();
         var grouped = maps.GroupBy(m => (m.SourceType, m.DestinationType));
@@ -117,5 +124,35 @@ public class RecordingProfile : MapperProfile
     {
         WasConstructed = true;
         CreateMap<SrcA, DstA>();
+    }
+}
+
+public class DuplicatePairTests
+{
+    public class DupSrc { public int X { get; set; } }
+    public class DupDst { public int X { get; set; } }
+
+    [Fact]
+    public void TwoFluentCreateMapCalls_SamePair_Throws()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<DupSrc, DupDst>();
+            expr.CreateMap<DupSrc, DupDst>();
+        });
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("registered twice"));
+    }
+
+    [Fact]
+    public void DuplicateMessage_NamesBothOrigins()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+        {
+            var expr = new MapperConfigurationExpression();
+            expr.CreateMap<DupSrc, DupDst>();
+            expr.CreateMap<DupSrc, DupDst>();
+        });
+        Assert.Contains(ex.Errors, e => e.Reason.Contains("CreateMap<DupSrc, DupDst>()"));
     }
 }

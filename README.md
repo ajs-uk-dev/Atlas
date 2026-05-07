@@ -426,6 +426,64 @@ Behavior summary:
 
 See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
 
+## Attribute-based configuration
+
+Decorate destination classes with `[AutoMap(typeof(SourceType))]` to declare mappings without writing a profile. Attributes coexist with profiles; both are discovered by `cfg.AddMaps(asm)` and `services.AddAtlas(asm)`.
+
+```csharp
+[AutoMap(typeof(Order))]
+public class OrderDto
+{
+    public int Id { get; init; }
+
+    [SourceMember("Customer.Name")]
+    public string CustomerName { get; init; } = "";
+
+    [Ignore]
+    public decimal Total { get; init; }
+
+    [NullSubstitute("(no email)")]
+    public string Email { get; init; } = "";
+}
+
+services.AddAtlas(typeof(OrderDto).Assembly);
+// Discovers OrderDto via [AutoMap]; mapping is convention + member-attribute driven.
+```
+
+### What attributes can express
+
+| Feature | Attribute |
+| --- | --- |
+| Class declaration | `[AutoMap(typeof(SourceType))]` |
+| Validation policy | `[AutoMap(MemberList = MemberList.Source)]` |
+| Auto-reverse | `[AutoMap(ReverseMap = true)]` |
+| Cycle-safe (PreserveReferences) | `[AutoMap(PreserveReferences = true)]` |
+| Skip member | `[Ignore]` |
+| Source-member redirect | `[SourceMember("Customer.Name")]` (incl. dotted paths) |
+| Null fallback | `[NullSubstitute("default")]` |
+
+### What attributes can't express
+
+Attributes can't carry lambdas. Use a fluent profile (or a fluent `cfg.CreateMap<>` call) for: `MapFrom(expr)`, `Condition` / `PreCondition`, `BeforeMap` / `AfterMap` lambdas or typed actions, `ConvertUsing`, `AddTransform`, `Include` / `IncludeBase`, `ForCtorParam`, `ForPath`, factory-form `NullSubstitute`, per-value enum overrides.
+
+### Conflict rule
+
+A `(TSource, TDestination)` pair must be declared exactly once. Declaring the same pair via both an attribute and a fluent `CreateMap` throws at config-build naming both registration sites. The same rule applies to two fluent `CreateMap` calls for the same pair (behavior change in v2 — see Migration notes below).
+
+### Profile-scope value transformer note
+
+Profile-scope value transformers do NOT fire on attribute-declared TypeMaps (they have no originating profile). Use global-scope transformers (`cfg.ValueTransformers.Add<T>(...)`) for cross-cutting transforms, or fluent profile-declared maps for profile-scoped ones.
+
+### Migration notes
+
+#### v1 → v2 with #12: duplicate `CreateMap` is now an error
+
+Previous v1 behavior on duplicate non-reverse `CreateMap` calls was silent last-write-wins. With #12 shipped, any second registration for the same `(TSource, TDestination)` pair throws `AtlasConfigurationException` at config-build, regardless of registration origin (profile fluent, scanner-translated attribute, repeated `cfg.CreateMap` on the configuration root, `.ReverseMap()`).
+
+Suggested migration: run existing tests against the new version. If any throw `AtlasConfigurationException` mentioning duplicate registration, the test exposed a latent configuration bug — pick one of the two registration sites and remove the other. The error message names both registration origins so the offending duplicate is easy to find.
+
+Note: this also makes calling `cfg.AddMaps(asm)` twice with the same assembly (which was previously idempotent in v1) a duplicate-registration error in v2. Call `AddMaps` exactly once per assembly per configuration.
+
 ## Reference handling for cycles
 
 Atlas can map graphs with cycles or shared references safely, opt-in per typemap.
@@ -509,7 +567,6 @@ See `docs/Atlas-Design-ReferenceHandling.md` for the full specification.
 
 Each of these has its own design doc to be written separately:
 
-- Attribute-based configuration
 - Expression translation (`UseAsDataSource`)
 
 ## Performance

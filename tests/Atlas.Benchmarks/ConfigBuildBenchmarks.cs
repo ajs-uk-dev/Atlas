@@ -10,28 +10,21 @@ namespace Atlas.Benchmarks;
 [MemoryDiagnoser]
 public class ConfigBuildBenchmarks
 {
-    [Params(10, 100, 1000)]
-    public int MapCount;
-
     [Benchmark]
     public MapperConfiguration ConfigBuild_FromCold()
     {
-        var config = new MapperConfiguration(c =>
-        {
-            for (var i = 0; i < MapCount; i++)
-                RegisterPair(c, i);
-        });
+        var config = new MapperConfiguration(c => RegisterPair(c));
         config.CompileMappings();
         return config;
     }
 
-    private static void RegisterPair(MapperConfigurationExpression cfg, int index)
+    private static void RegisterPair(MapperConfigurationExpression cfg)
     {
-        // v1 caveat: distinct (TSource, TDest) pairs at scale require generated types — out of scope
-        // here. Re-registering the same pair last-call-wins still exercises the CreateMap call site,
-        // dictionary upsert, and one full ResolveMissingMembers + Seal + Compile cycle. That covers
-        // the dominant cost. Distinct-pair scaling moves to a v2 design doc.
-        _ = index;
+        // Distinct (TSource, TDest) pairs at scale require generated types — out of scope here.
+        // BenchmarkDotNet already iterates each [Benchmark] method many times for timing, so a
+        // single CreateMap call per invocation exercises the CreateMap call site, dictionary
+        // insert, and one full ResolveMissingMembers + Seal + Compile cycle — covering the
+        // dominant cost. Distinct-pair scaling moves to a v2 design doc.
         cfg.CreateMap<BuildSrc, BuildDst>();
     }
 
