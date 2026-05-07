@@ -1,5 +1,4 @@
 using System.Reflection;
-using Atlas.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Atlas;
@@ -33,8 +32,7 @@ public static class AtlasServiceCollectionExtensions
             var expression = new MapperConfigurationExpression();
             configure?.Invoke(expression);
 
-            foreach (var profile in ProfileScanner.Discover(assemblies))
-                expression.AddProfile(profile);
+            expression.AddMaps(assemblies);
 
             var configuration = new MapperConfiguration(expression, sp);
             configuration.CompileMappings();

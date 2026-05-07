@@ -20,13 +20,10 @@ public class AttributeFluentInteractionTests
     }
 
     [Fact]
-    public void AddAtlas_DI_DiscoversAttributeDecoratedType()
+    public void AddAtlas_ConfigureCallback_AddMapsInside_DiscoversAttribute()
     {
-        // services.AddAtlas internally calls cfg.AddMaps. The build-time exception will be
-        // swallowed by the configure callback's try/catch... actually services.AddAtlas does
-        // NOT swallow — it calls AddMaps directly. To test DI discovery we need a way to
-        // tolerate the bad-fixture exception. Workaround: use a SEPARATE configure callback
-        // shape that runs AddMaps inside a try/catch.
+        // Uses the configure-callback overload with an inner AddMaps call. The callback
+        // tolerates bad-fixture pollution from sibling fixtures via try/catch.
         var services = new ServiceCollection();
         services.AddAtlas(c =>
         {
@@ -37,6 +34,25 @@ public class AttributeFluentInteractionTests
         var mapper = sp.GetRequiredService<IMapper>();
         var dto = mapper.Map<InteractionDtoA>(new InteractionSrcA { Id = 5 });
         Assert.Equal(5, dto.Id);
+    }
+
+    [Fact]
+    public void AddAtlas_NoConfigure_RoutesAttributeDiscoveryThroughAddMaps()
+    {
+        // Exercises the no-configure overload services.AddAtlas(asm). Before the C1 fix this
+        // overload silently ignored [AutoMap] types because it bypassed AddMaps. The fix routes
+        // the scan through expression.AddMaps(assemblies) which invokes AttributeScanner.Discover.
+        //
+        // The test assembly contains Task 3 bad fixtures, so attribute discovery throws
+        // AtlasConfigurationException. We use this throw as the SIGNAL that the wiring is now
+        // active — before C1 fix, this throw would not have occurred (the bad fixtures would
+        // have been silently ignored).
+        //
+        // MapperConfiguration is constructed lazily inside the DI singleton factory, so the
+        // throw surfaces at GetRequiredService<IMapper>() time, not at AddAtlas() time.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        using var sp = services.AddAtlas(typeof(InteractionDtoA).Assembly).BuildServiceProvider();
+        Assert.Throws<AtlasConfigurationException>(() => sp.GetRequiredService<IMapper>());
     }
 
     [Fact]
