@@ -131,6 +131,27 @@ public class AttributeScannerValidationTests
         Assert.True(ex.Errors.Count >= 2,
             $"Expected at least 2 errors in aggregated exception, got {ex.Errors.Count}.");
     }
+
+    [Fact]
+    public void OpenGenericMessages_DoNotContainDoubleAngleBrackets()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+            AttributeScanner.Discover(typeof(OpenGenericSourceFixture).Assembly, new MapperConfigurationExpression()));
+        foreach (var error in ex.Errors)
+        {
+            Assert.DoesNotContain("<><>", error.Reason);
+        }
+    }
+
+    [Fact]
+    public void DynamicShapeMessage_UsesCSharpKeywords()
+    {
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+            AttributeScanner.Discover(typeof(DictionarySourceDto).Assembly, new MapperConfigurationExpression()));
+        var dictError = ex.Errors.First(e => e.Reason.Contains("dynamic shape") && e.SourceType == typeof(System.Collections.Generic.Dictionary<string, object>));
+        Assert.Contains("Dictionary<string, object>", dictError.Reason);
+        Assert.DoesNotContain("Dictionary<String, Object>", dictError.Reason);
+    }
 }
 
 public class SomeSource { public int X { get; set; } }

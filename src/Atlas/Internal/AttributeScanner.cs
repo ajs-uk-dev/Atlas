@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 
 namespace Atlas.Internal;
 
@@ -75,7 +74,7 @@ internal static class AttributeScanner
         {
             errors.Add(new(srcType, dstType, "(register)",
                 $"[AutoMap] applied to open-generic type '{FormatTypeName(dstType)}'. " +
-                $"Use cfg.CreateMap(typeof({FormatTypeName(srcType)}<>), typeof({FormatTypeName(dstType)}<>)) for open-generic registrations."));
+                $"Use cfg.CreateMap(typeof(Source<>), typeof(Dest<>)) for open-generic registrations."));
             return false;
         }
 
@@ -116,7 +115,7 @@ internal static class AttributeScanner
         {
             errors.Add(new(srcType, dstType, "(register)",
                 $"[AutoMap] on '{dstType.Name}' specifies open-generic source type '{FormatTypeName(srcType)}'. " +
-                $"Open generics use cfg.CreateMap(typeof({FormatTypeName(srcType)}<>), typeof({FormatTypeName(dstType)}<>)) — " +
+                $"Open generics use cfg.CreateMap(typeof(Source<>), typeof(Dest<>)) — " +
                 $"attribute syntax is not supported for open generics."));
             return false;
         }
@@ -136,6 +135,8 @@ internal static class AttributeScanner
 
     private static string FormatTypeName(Type t)
     {
+        var keyword = CSharpKeywordFor(t);
+        if (keyword is not null) return keyword;
         if (!t.IsGenericType) return t.Name;
         var name = t.Name;
         var tickIdx = name.IndexOf('`');
@@ -143,5 +144,25 @@ internal static class AttributeScanner
         if (t.IsGenericTypeDefinition) return $"{name}<>";
         var args = string.Join(", ", t.GetGenericArguments().Select(FormatTypeName));
         return $"{name}<{args}>";
+    }
+
+    private static string? CSharpKeywordFor(Type t)
+    {
+        if (t == typeof(string)) return "string";
+        if (t == typeof(object)) return "object";
+        if (t == typeof(bool)) return "bool";
+        if (t == typeof(byte)) return "byte";
+        if (t == typeof(sbyte)) return "sbyte";
+        if (t == typeof(short)) return "short";
+        if (t == typeof(ushort)) return "ushort";
+        if (t == typeof(int)) return "int";
+        if (t == typeof(uint)) return "uint";
+        if (t == typeof(long)) return "long";
+        if (t == typeof(ulong)) return "ulong";
+        if (t == typeof(float)) return "float";
+        if (t == typeof(double)) return "double";
+        if (t == typeof(decimal)) return "decimal";
+        if (t == typeof(char)) return "char";
+        return null;
     }
 }
