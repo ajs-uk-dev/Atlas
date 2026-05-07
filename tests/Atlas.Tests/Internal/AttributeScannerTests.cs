@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 using Atlas.Internal;
 
@@ -192,4 +193,97 @@ public abstract class AbstractAttributeFixture
 internal class InternalAttributeFixture
 {
     public int X { get; set; }
+}
+
+public class AttributeScannerPathTests
+{
+    private static (LambdaExpression? lambda, Type? leaf, List<ConfigurationError> errors) Walk(Type src, string path)
+    {
+        var errors = new List<ConfigurationError>();
+        var lambda = AttributeScanner.BuildSourcePathExpressionForTest(
+            src, path, "TestDest", typeof(TestDest), errors, out var leaf);
+        return (lambda, leaf, errors);
+    }
+
+    public class TestDest { public string Field { get; set; } = ""; }
+
+    public class FlatSource { public int X { get; set; } public string Y { get; set; } = ""; }
+
+    public class NestedSource
+    {
+        public Customer Customer { get; set; } = new();
+    }
+    public class Customer
+    {
+        public string Name { get; set; } = "";
+        public Address Address { get; set; } = new();
+    }
+    public class Address { public string City { get; set; } = ""; }
+
+    public class WriteOnlySource
+    {
+        private string _x = "";
+        public string X { set { _x = value; } }
+    }
+
+    public class FieldSource
+    {
+        public int Field;
+    }
+
+    [Fact]
+    public void Flat_ResolvesProperty()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(FlatSource), "X");
+        Assert.NotNull(lambda);
+        Assert.Equal(typeof(int), leaf);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void Dotted_ResolvesNestedProperty()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(NestedSource), "Customer.Name");
+        Assert.NotNull(lambda);
+        Assert.Equal(typeof(string), leaf);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void DottedTwoLevel_ResolvesDeepNestedProperty()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(NestedSource), "Customer.Address.City");
+        Assert.NotNull(lambda);
+        Assert.Equal(typeof(string), leaf);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void MissingSegment_ProducesStructuredError()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(NestedSource), "Customer.Missing");
+        Assert.Null(lambda);
+        Assert.Null(leaf);
+        Assert.Single(errors);
+        Assert.Contains("Missing", errors[0].Reason);
+        Assert.Contains("Customer", errors[0].Reason);
+    }
+
+    [Fact]
+    public void WriteOnlyLeaf_ProducesNonReadableError()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(WriteOnlySource), "X");
+        Assert.Null(lambda);
+        Assert.Single(errors);
+        Assert.Contains("no public getter", errors[0].Reason);
+    }
+
+    [Fact]
+    public void FieldLeaf_Resolves()
+    {
+        var (lambda, leaf, errors) = Walk(typeof(FieldSource), "Field");
+        Assert.NotNull(lambda);
+        Assert.Equal(typeof(int), leaf);
+        Assert.Empty(errors);
+    }
 }

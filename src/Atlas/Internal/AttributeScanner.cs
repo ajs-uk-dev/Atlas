@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Atlas.Internal;
@@ -165,4 +166,68 @@ internal static class AttributeScanner
         if (t == typeof(char)) return "char";
         return null;
     }
+
+    /// <summary>
+    /// Walks <paramref name="dottedPath"/> against <paramref name="srcType"/>, building a
+    /// chained MemberExpression. Each segment must resolve to a public readable property or
+    /// a public field. Errors are appended to <paramref name="errors"/> and the method returns
+    /// <c>null</c> on failure.
+    /// </summary>
+    internal static LambdaExpression? BuildSourcePathExpression(
+        Type srcType, string dottedPath, string destMemberName, Type decoratedType,
+        List<ConfigurationError> errors, out Type? leafType)
+    {
+        leafType = null;
+        var segments = dottedPath.Split('.');
+        var srcParam = Expression.Parameter(srcType, "s");
+        Expression current = srcParam;
+        Type currentType = srcType;
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+
+            var prop = currentType.GetProperty(segment, BindingFlags.Public | BindingFlags.Instance);
+            FieldInfo? field = null;
+            if (prop is null)
+                field = currentType.GetField(segment, BindingFlags.Public | BindingFlags.Instance);
+
+            if (prop is null && field is null)
+            {
+                errors.Add(new(srcType, decoratedType, destMemberName,
+                    $"[SourceMember(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
+                    $"segment '{segment}' not found on '{currentType.Name}'."));
+                return null;
+            }
+
+            if (prop is { CanRead: false })
+            {
+                errors.Add(new(srcType, decoratedType, destMemberName,
+                    $"[SourceMember(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
+                    $"segment '{segment}' on '{currentType.Name}' has no public getter."));
+                return null;
+            }
+
+            if (prop is not null)
+            {
+                current = Expression.Property(current, prop);
+                currentType = prop.PropertyType;
+            }
+            else
+            {
+                current = Expression.Field(current, field!);
+                currentType = field!.FieldType;
+            }
+        }
+
+        leafType = currentType;
+        var funcType = typeof(Func<,>).MakeGenericType(srcType, leafType);
+        return Expression.Lambda(funcType, current, srcParam);
+    }
+
+    // Test-only entry point (visible via InternalsVisibleTo to Atlas.Tests)
+    internal static LambdaExpression? BuildSourcePathExpressionForTest(
+        Type srcType, string dottedPath, string destMemberName, Type decoratedType,
+        List<ConfigurationError> errors, out Type? leafType) =>
+        BuildSourcePathExpression(srcType, dottedPath, destMemberName, decoratedType, errors, out leafType);
 }
