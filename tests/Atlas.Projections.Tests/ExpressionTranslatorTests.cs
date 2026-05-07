@@ -118,3 +118,35 @@ public class UEDS_DeepFlattenAddress { public string City { get; set; } = ""; }
 public class UEDS_DeepFlattenCustomer { public UEDS_DeepFlattenAddress Address { get; set; } = new(); }
 public class UEDS_DeepFlattenSrc { public UEDS_DeepFlattenCustomer Customer { get; set; } = new(); }
 public class UEDS_DeepFlattenDto { public string CustomerAddressCity { get; set; } = ""; }
+
+public class ExpressionTranslatorCustomExpressionTests
+{
+    [Fact]
+    public void CustomExpression_InlinesBodyViaParameterReplacer()
+    {
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<UEDS_CustomSrc, UEDS_CustomDto>()
+                .ForMember(d => d.DisplayName,
+                           opt => opt.MapFrom(s => s.FirstName + " " + s.LastName)));
+        Expression<Func<UEDS_CustomDto, bool>> predicate = d => d.DisplayName.Contains("Alice");
+
+        var translated = (Expression<Func<UEDS_CustomSrc, bool>>)ExpressionTranslator.Translate(
+            cfg.Internal_Registry,
+            new TypePair(typeof(UEDS_CustomSrc), typeof(UEDS_CustomDto)),
+            predicate);
+
+        var compiled = translated.Compile();
+        Assert.True(compiled(new UEDS_CustomSrc { FirstName = "Alice", LastName = "Smith" }));
+        Assert.False(compiled(new UEDS_CustomSrc { FirstName = "Bob", LastName = "Smith" }));
+    }
+}
+
+public class UEDS_CustomSrc
+{
+    public string FirstName { get; set; } = "";
+    public string LastName { get; set; } = "";
+}
+public class UEDS_CustomDto
+{
+    public string DisplayName { get; set; } = "";
+}

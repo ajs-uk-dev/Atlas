@@ -139,9 +139,16 @@ internal static class ExpressionTranslator
                 return result;
             }
 
-            // CustomExpression case: filled in Task 4.
+            // CustomExpression case: inline the body, substituting the lambda's parameter
+            // with currentSrcExpr. Same code path as ProjectionPlanBuilder.BuildBinding
+            // (src/Atlas.Projections/Internal/ProjectionPlanBuilder.cs lines 105-110).
             if (pm.CustomExpression is not null)
-                throw new NotImplementedException("CustomExpression filled in Task 4.");
+            {
+                return ParameterReplacer.Replace(
+                    pm.CustomExpression.Body,
+                    pm.CustomExpression.Parameters[0],
+                    currentSrcExpr);
+            }
 
             // Phase 3 rejection: unmapped (no SourcePath, no CustomExpression, not Ignored, not HasConstant).
             // KEEP THIS WORDING VERBATIM — the existing MemberNotFound test asserts on "no PropertyMap".
