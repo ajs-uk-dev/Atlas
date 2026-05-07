@@ -22,6 +22,9 @@ internal static class AttributeScanner
     private const string IgnoreMethodName =
         nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.Ignore);
 
+    private const string MapFromMethodName =
+        nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.MapFrom);
+
     /// <summary>
     /// Top-level entry point. Enumerates public top-level non-abstract decorated types and
     /// processes each. Errors are accumulated; a fatal duplicate-pair throws immediately.
@@ -142,7 +145,26 @@ internal static class AttributeScanner
             }
             else
             {
-                // [SourceMember] handling lands in Task 7.
+                Type? sourceMemberType = null;
+                if (sourceMember is not null)
+                {
+                    var sourceLambda = BuildSourcePathExpression(srcType, sourceMember.MemberName,
+                        prop.Name, dstType, errors, out sourceMemberType);
+
+                    if (sourceLambda is not null && sourceMemberType is not null)
+                    {
+                        var mapFromOpen = imemberConfigClosed.GetMethods()
+                            .Single(m => m.Name == MapFromMethodName
+                                      && m.IsGenericMethodDefinition
+                                      && m.GetParameters().Length == 1
+                                      && m.GetParameters()[0].ParameterType.IsGenericType
+                                      && m.GetParameters()[0].ParameterType.GetGenericTypeDefinition() == typeof(Expression<>));
+                        var mapFromClosed = mapFromOpen.MakeGenericMethod(sourceMemberType);
+                        statements.Add(Expression.Call(optParam, mapFromClosed,
+                            Expression.Constant(sourceLambda, sourceLambda.GetType())));
+                    }
+                }
+
                 // [NullSubstitute] handling lands in Task 8.
             }
 
