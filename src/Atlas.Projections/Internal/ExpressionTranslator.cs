@@ -113,18 +113,41 @@ internal static class ExpressionTranslator
 
         private Expression BuildSourceExpression(PropertyMap pm, Expression currentSrcExpr)
         {
-            // Task 2 supports SourcePath only. Multi-segment paths, CustomExpression, recursive
-            // nesting, and rejection rules for Ignored/HasConstant/unmapped land in Tasks 3-5.
-            if (pm.SourcePath is null && pm.CustomExpression is null)
-                throw Reject(_rootPair.Source, _rootPair.Destination, pm.Name,
-                    $"destination member '{_rootPair.Destination.Name}.{pm.Name}' has no PropertyMap. " +
-                    "Use UseAsDataSource only with members that have a configured source.");
+            var srcType = currentSrcExpr.Type;
+            var dstType = _rootPair.Destination;
 
-            if (pm.SourcePath is null)
-                throw new NotImplementedException("Filled in Tasks 3-5.");
+            // Phase 3 rejection: Ignored member.
+            if (pm.Ignored)
+                throw Reject(srcType, dstType, pm.Name,
+                    $"destination member '{dstType.Name}.{pm.Name}' is configured with Ignore() and " +
+                    "cannot be referenced in a UseAsDataSource expression.");
 
-            // Single-segment path — chain a single MemberAccess on the source parameter.
-            return Expression.MakeMemberAccess(currentSrcExpr, pm.SourcePath.Members[0]);
+            // Phase 3 rejection: constant-mapped member.
+            if (pm.HasConstant)
+                throw Reject(srcType, dstType, pm.Name,
+                    $"destination member '{dstType.Name}.{pm.Name}' is a constant ({pm.ConstantValue}); " +
+                    "predicates against it are trivially true/false. Compare against the constant directly instead.");
+
+            // SourcePath case: walk the path, chaining MemberAccess.
+            if (pm.SourcePath is not null)
+            {
+                Expression result = currentSrcExpr;
+                foreach (var member in pm.SourcePath.Members)
+                {
+                    result = Expression.MakeMemberAccess(result, member);
+                }
+                return result;
+            }
+
+            // CustomExpression case: filled in Task 4.
+            if (pm.CustomExpression is not null)
+                throw new NotImplementedException("CustomExpression filled in Task 4.");
+
+            // Phase 3 rejection: unmapped (no SourcePath, no CustomExpression, not Ignored, not HasConstant).
+            // KEEP THIS WORDING VERBATIM — the existing MemberNotFound test asserts on "no PropertyMap".
+            throw Reject(srcType, dstType, pm.Name,
+                $"destination member '{dstType.Name}.{pm.Name}' has no PropertyMap. " +
+                "Use UseAsDataSource only with members that have a configured source.");
         }
     }
 }

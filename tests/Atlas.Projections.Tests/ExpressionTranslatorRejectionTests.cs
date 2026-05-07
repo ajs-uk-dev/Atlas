@@ -91,7 +91,49 @@ public class ExpressionTranslatorMemberRejectionTests
         Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("PhantomMember")
                                           && d.Reason.Contains("no PropertyMap"));
     }
+
+    [Fact]
+    public void IgnoredMember_ThrowsAtlasProjectionException()
+    {
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<UEDS_IgnoredSrc, UEDS_IgnoredDto>()
+                .ForMember(d => d.Computed, opt => opt.Ignore()));
+        Expression<Func<UEDS_IgnoredDto, bool>> predicate = d => d.Computed > 100;
+
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ExpressionTranslator.Translate(
+                cfg.Internal_Registry,
+                new TypePair(typeof(UEDS_IgnoredSrc), typeof(UEDS_IgnoredDto)),
+                predicate));
+
+        Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("Computed")
+                                          && d.Reason.Contains("Ignore"));
+    }
+
+    [Fact]
+    public void ConstantMember_ThrowsAtlasProjectionException()
+    {
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<UEDS_ConstantSrc, UEDS_ConstantDto>()
+                .ForMember(d => d.Status, opt => opt.MapFrom("active")));
+        Expression<Func<UEDS_ConstantDto, bool>> predicate = d => d.Status == "active";
+
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ExpressionTranslator.Translate(
+                cfg.Internal_Registry,
+                new TypePair(typeof(UEDS_ConstantSrc), typeof(UEDS_ConstantDto)),
+                predicate));
+
+        Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("Status")
+                                          && d.Reason.Contains("constant"));
+    }
 }
 
 public class UEDS_MissingMemberSrc { public int Id { get; set; } }
 public class UEDS_MissingMemberDto { public int Id { get; set; } public string PhantomMember { get; set; } = ""; }
+
+public class UEDS_IgnoredSrc { public int Id { get; set; } }
+public class UEDS_IgnoredDto { public int Id { get; set; } public decimal Computed { get; set; } }
+
+public class UEDS_ConstantSrc { public int Id { get; set; } }
+public class UEDS_ConstantDto { public int Id { get; set; } public string Status { get; set; } = ""; }
