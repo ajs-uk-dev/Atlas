@@ -158,3 +158,30 @@ public class UEDS_MidChainCustomer { public string Name { get; set; } = ""; }
 public class UEDS_MidChainCustomerDto { public string Name { get; set; } = ""; }
 public class UEDS_MidChainSrc { public UEDS_MidChainCustomer Customer { get; set; } = new(); }
 public class UEDS_MidChainDto { public UEDS_MidChainCustomerDto Customer { get; set; } = new(); }
+
+public class ExpressionTranslatorInnerLambdaTests
+{
+    [Fact]
+    public void InnerLambdaOnCollectionDestinationMember_ThrowsAtlasProjectionException()
+    {
+        var cfg = new MapperConfiguration(c =>
+        {
+            c.CreateMap<UEDS_InnerSrc, UEDS_InnerDto>();
+            c.CreateMap<UEDS_InnerLineSrc, UEDS_InnerLineDto>();
+        });
+        Expression<Func<UEDS_InnerDto, bool>> predicate = d => d.Lines.Any(l => l.Total > 100);
+
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ExpressionTranslator.Translate(
+                cfg.Internal_Registry,
+                new TypePair(typeof(UEDS_InnerSrc), typeof(UEDS_InnerDto)),
+                predicate));
+
+        Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("inner lambda"));
+    }
+}
+
+public class UEDS_InnerLineSrc { public decimal Total { get; set; } }
+public class UEDS_InnerLineDto { public decimal Total { get; set; } }
+public class UEDS_InnerSrc { public List<UEDS_InnerLineSrc> Lines { get; set; } = new(); }
+public class UEDS_InnerDto { public List<UEDS_InnerLineDto> Lines { get; set; } = new(); }

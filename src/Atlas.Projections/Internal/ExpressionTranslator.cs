@@ -80,6 +80,69 @@ internal static class ExpressionTranslator
         protected override Expression VisitParameter(ParameterExpression node) =>
             node == _destParam ? _srcParam : base.VisitParameter(node);
 
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // Defensive detection per design §5.4: reject inner lambdas on collection-typed
+            // destination members (e.g., d.Lines.Any(l => l.Total > 100)). v1 doesn't thread
+            // destination-element-type context into inner lambdas; allowing the visit to
+            // proceed would produce malformed expressions that the LINQ provider rejects.
+            if (IsCollectionPredicateMethod(node.Method) &&
+                node.Arguments.Count >= 2)
+            {
+                // First argument is the source collection; we expect it to be a member-access
+                // chain on _destParam (or pass-through if it's a closure).
+                var firstArg = node.Arguments[0];
+                bool firstArgIsDestinationMember =
+                    firstArg is MemberExpression me && SpineIsRootedAtDestParam(me);
+
+                if (firstArgIsDestinationMember &&
+                    node.Arguments[1] is LambdaExpression innerLambda &&
+                    innerLambda.Parameters.Count == 1)
+                {
+                    // The inner lambda's parameter is typed against the destination element
+                    // type — translation would produce a type-incompatible expression.
+                    throw Reject(_rootPair.Source, _rootPair.Destination, "(translate)",
+                        "inner lambdas on collection-typed destination members are not " +
+                        "translated in v1. Use AsQueryable() then LINQ-to-Objects, or " +
+                        "rewrite the predicate against the source.");
+                }
+            }
+
+            return base.VisitMethodCall(node);
+        }
+
+        /// <summary>
+        /// True if the method belongs to <see cref="System.Linq.Enumerable"/> or
+        /// <see cref="System.Linq.Queryable"/> AND its name is a recognized
+        /// collection-predicate operator that takes an inner lambda.
+        /// </summary>
+        private static bool IsCollectionPredicateMethod(System.Reflection.MethodInfo method)
+        {
+            if (method.DeclaringType != typeof(System.Linq.Enumerable) &&
+                method.DeclaringType != typeof(System.Linq.Queryable))
+                return false;
+
+            return method.Name switch
+            {
+                "Any" or "All" or "Where" or "Select" or "First" or
+                "FirstOrDefault" or "Single" or "SingleOrDefault" or "Count" => true,
+                _ => false,
+            };
+        }
+
+        /// <summary>
+        /// True if a MemberExpression's spine root is the destination parameter.
+        /// </summary>
+        private bool SpineIsRootedAtDestParam(MemberExpression node)
+        {
+            Expression? current = node;
+            while (current is MemberExpression me)
+            {
+                current = me.Expression;
+            }
+            return current is ParameterExpression p && p == _destParam;
+        }
+
         protected override Expression VisitMember(MemberExpression node)
         {
             // Walk the spine: collect chain of MemberExpressions rooted at a single Expression.
