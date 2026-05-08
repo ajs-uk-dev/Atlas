@@ -484,6 +484,118 @@ Suggested migration: run existing tests against the new version. If any throw `A
 
 Note: this also makes calling `cfg.AddMaps(asm)` twice with the same assembly (which was previously idempotent in v1) a duplicate-registration error in v2. Call `AddMaps` exactly once per assembly per configuration.
 
+## Expression translation (UseAsDataSource)
+
+Wrap an `IQueryable<TSource>` and write filtering, sorting, and paging in destination-DTO terms. Atlas translates the destination-typed lambdas back to source-typed expressions before they hit your LINQ provider.
+
+```csharp
+public class OrderProfile : MapperProfile
+{
+    public OrderProfile() { CreateMap<Order, OrderDto>(); }
+}
+
+// In a controller:
+var orders = db.Orders
+    .UseAsDataSource(mapperConfig)
+    .For<OrderDto>()
+    .Where(d => d.CustomerName.StartsWith("A"))
+    .OrderBy(d => d.Total)
+    .Take(10)
+    .ToList();
+```
+
+The wrapper translates `d.CustomerName.StartsWith("A")` to `src.Customer.Name.StartsWith("A")` (per the typemap's `SourcePath`) before applying it to the underlying `IQueryable<Order>`. EF Core sees a normal source-typed expression and emits SQL like:
+
+```sql
+SELECT TOP(10) [proj].[Id], [c].[FirstName] AS [CustomerFirstName], ...
+FROM [Orders] AS [proj]
+INNER JOIN [Customers] AS [c] ON [proj].[CustomerId] = [c].[Id]
+WHERE [c].[FirstName] LIKE 'A%'
+ORDER BY [proj].[Total]
+```
+
+### Operator scope
+
+| Category | Operators |
+| --- | --- |
+| Filtering | `Where` |
+| Ordering | `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` |
+| Paging | `Skip`, `Take` |
+| Terminal predicate | `Any`, `All`, `Count(predicate)`, `First[OrDefault](predicate)`, `Single[OrDefault](predicate)`, `Last[OrDefault](predicate)` |
+
+`Select`, `SelectMany`, `GroupBy`, `Include`, `Join`, async LINQ (`ToListAsync` etc.) are not on the wrapper. Use `AsQueryable()` to drop down to a translated `IQueryable<TDestination>`:
+
+```csharp
+var totals = db.Orders.UseAsDataSource(mapperConfig).For<OrderDto>()
+    .Where(d => d.Total > 0)
+    .AsQueryable()                  // returns IQueryable<OrderDto> with ProjectTo applied
+    .Select(d => d.Total)            // standard LINQ from here
+    .ToListAsync();
+```
+
+### Direct-use helper
+
+`cfg.Translate<TSource, TDestination, TResult>(destExpr)` returns a translated `Expression<Func<TSource, TResult>>` for power-user composition:
+
+```csharp
+var srcPredicate = mapperConfig.Translate<Order, OrderDto, bool>(d => d.CustomerName == "Alice");
+// srcPredicate is now Expression<Func<Order, bool>>: src => src.Customer.Name == "Alice"
+
+var orders = db.Orders.Where(srcPredicate).ProjectTo<OrderDto>(mapperConfig).ToList();
+```
+
+### Rejection rule
+
+Predicates against destination members that have no source mapping throw `AtlasProjectionException` at the operator call site:
+
+- `[Ignore]`'d members → "destination member 'OrderDto.X' is configured with Ignore() and cannot be referenced in a UseAsDataSource expression."
+- Constant-mapped members (`MapFrom("active")`) → "destination member 'OrderDto.Status' is a constant; predicates against it are trivially true/false."
+- Unmapped members (no convention or fluent source) → "destination member 'OrderDto.X' has no PropertyMap."
+
+The error message names the destination member so you can fix the configuration without reading the stack trace.
+
+### Caching
+
+Translation results cache per `(TypePair, lambda-reference-identity)`. Reuse `static readonly Expression<>` lambdas to maximize cache hits:
+
+```csharp
+public static class OrderFilters
+{
+    public static readonly Expression<Func<OrderDto, bool>> Active = d => d.Status == "Active";
+}
+
+// Both calls hit the cache after the first one:
+db.Orders.UseAsDataSource(cfg).For<OrderDto>().Where(OrderFilters.Active).ToList();
+db.Orders.UseAsDataSource(cfg).For<OrderDto>().Where(OrderFilters.Active).ToList();
+```
+
+Freshly-constructed lambdas (`d => d.Total > 100`) miss the cache (different reference each call). They translate once each; correctness unchanged.
+
+### Limitations
+
+- **Inner lambdas on collection-typed destination members are not translated** in v1. `d => d.Lines.Any(l => l.Total > 100)` throws at translate time; rewrite the predicate against the source (`db.Orders.Where(o => o.Lines.Any(l => l.Total > 100)).UseAsDataSource(cfg).For<OrderDto>()`) or use `AsQueryable()` and operate on the materialized destination collection.
+- **Derived-type dispatch via inheritance is not supported.** A wrapper bound to a base typemap can't translate predicates against derived-only properties. Workaround: `query.OfType<OnlineOrder>().UseAsDataSource(cfg).For<OnlineOrderDto>()`.
+- **Bare-parameter usage** (`d => d == other` or `d => SomeFn(d)`) is not pre-detected. The LINQ provider's standard error fires at query execution.
+
+### Compatibility with v2 features
+
+| Feature | UseAsDataSource v1 |
+| --- | --- |
+| ProjectTo (#1) | ✓ Composes via enumeration |
+| Inheritance (#2) | ✓ Root only; derived-dispatch limited |
+| Enum surface (#3) | ✓ Works |
+| ReverseMap (#4) | ✓ Works |
+| `ForPath` (#4) | ✗ Rejected by existing dual-gate |
+| Hooks (#5) | ✗ Rejected by existing dual-gate |
+| Value transformers (#6 global/typemap) | ✓ Works |
+| Profile-scope transformers (#6) | ✗ Don't fire (`OriginatingProfile == null`) |
+| Conditional mapping (#7) | ✓ Inlined |
+| Null substitution (#8) | ✓ Translates to `COALESCE` (projection only — predicate path is a v1 limitation) |
+| Open generics (#9) | ✓ Closed pair via lazy materialization |
+| Dynamic mapping (#10) | ✗ Rejected by existing dual-gate |
+| `PreserveReferences` (#11) | ✗ Rejected by existing dual-gate |
+| Attribute config (#12) | ✓ Works |
+
 ## Reference handling for cycles
 
 Atlas can map graphs with cycles or shared references safely, opt-in per typemap.
@@ -565,9 +677,7 @@ See `docs/Atlas-Design-ReferenceHandling.md` for the full specification.
 
 ## Deferred to v2
 
-Each of these has its own design doc to be written separately:
-
-- Expression translation (`UseAsDataSource`)
+All thirteen Atlas v2 deferred features have shipped. See individual sections above and `docs/` for full design documents.
 
 ## Performance
 
