@@ -554,6 +554,12 @@ Predicates against destination members that have no source mapping throw `AtlasP
 
 The error message names the destination member so you can fix the configuration without reading the stack trace.
 
+**Note on rejection point:** if the underlying TypeMap rejects projection (hooks, `PreserveReferences`, dynamic-shape, or `ForPath`), the rejection error message depends on whether you call any translated operator first:
+- `wrapper.Where(d => d.X).ToList()` — Phase 2 dual-gate fires inside the translator at `.Where(...)` time. Error has the `"UseAsDataSource translation: "` prefix.
+- `wrapper.ToList()` (no operator) — routes through `ProjectTo` directly. Error is the standard `ProjectTo` rejection message without the prefix.
+
+Both throw `AtlasProjectionException` with the same diagnostic content; only the wrapping prefix differs.
+
 ### Caching
 
 Translation results cache per `(TypePair, lambda-reference-identity)`. Reuse `static readonly Expression<>` lambdas to maximize cache hits:
@@ -574,6 +580,7 @@ Freshly-constructed lambdas (`d => d.Total > 100`) miss the cache (different ref
 ### Limitations
 
 - **Inner lambdas on collection-typed destination members are not translated** in v1. `d => d.Lines.Any(l => l.Total > 100)` throws at translate time; rewrite the predicate against the source (`db.Orders.Where(o => o.Lines.Any(l => l.Total > 100)).UseAsDataSource(cfg).For<OrderDto>()`) or use `AsQueryable()` and operate on the materialized destination collection.
+- **Property access on collection-typed destination members is not specialized** in v1. `d => d.Lines.Count` (the property accessor on `IList<>`/`ICollection<>`/`IEnumerable<>`) is rejected with a "nested map not registered" error rather than translated to `src.Lines.Count`. Workaround: rewrite against the source (`db.Orders.Where(o => o.Lines.Count > 0).UseAsDataSource(cfg).For<OrderDto>()`).
 - **Derived-type dispatch via inheritance is not supported.** A wrapper bound to a base typemap can't translate predicates against derived-only properties. Workaround: `query.OfType<OnlineOrder>().UseAsDataSource(cfg).For<OnlineOrderDto>()`.
 - **Bare-parameter usage** (`d => d == other` or `d => SomeFn(d)`) is not pre-detected. The LINQ provider's standard error fires at query execution.
 
