@@ -8,8 +8,6 @@ namespace Atlas.Projections.Internal;
 /// destination-typed LINQ-operator surface. Each operator translates the destination-
 /// typed lambda via <see cref="ExpressionTranslator"/> + <see cref="TranslationPlanCache"/>
 /// and applies the source-typed result to the underlying query.
-///
-/// Task 8: skeleton with stub operator implementations. Tasks 9-10 fill in the bodies.
 /// </summary>
 internal sealed class UseAsDataSourceQueryable<TSource, TDestination>
     : IUseAsDataSourceOrdered<TSource, TDestination>
@@ -25,28 +23,61 @@ internal sealed class UseAsDataSourceQueryable<TSource, TDestination>
         _pair = new TypePair(typeof(TSource), typeof(TDestination));
     }
 
-    // Filtering
-    public IUseAsDataSourceQueryable<TSource, TDestination> Where(
-        Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 9");
+    private Expression<Func<TSource, TResult>> Translate<TResult>(
+        Expression<Func<TDestination, TResult>> destLambda)
+    {
+        var cached = TranslationPlanCacheRegistry.For(_configuration).GetOrTranslate(
+            _pair, destLambda,
+            () => ExpressionTranslator.Translate(_configuration.Internal_Registry, _pair, destLambda));
+        return (Expression<Func<TSource, TResult>>)cached;
+    }
 
-    // Ordering
+    private static IOrderedQueryable<TSource> AsOrderedQueryable(IQueryable<TSource> q) =>
+        q as IOrderedQueryable<TSource>
+        ?? throw new InvalidOperationException(
+            "ThenBy/ThenByDescending called on a non-ordered query. " +
+            "Call OrderBy or OrderByDescending first.");
+
+    // ---- Filtering ----
+    public IUseAsDataSourceQueryable<TSource, TDestination> Where(
+        Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)),
+            _configuration);
+
+    // ---- Ordering ----
     public IUseAsDataSourceOrdered<TSource, TDestination> OrderBy<TKey>(
-        Expression<Func<TDestination, TKey>> keySelector) => throw new NotImplementedException("Task 9");
+        Expression<Func<TDestination, TKey>> keySelector) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.OrderBy(Translate(keySelector)),
+            _configuration);
 
     public IUseAsDataSourceOrdered<TSource, TDestination> OrderByDescending<TKey>(
-        Expression<Func<TDestination, TKey>> keySelector) => throw new NotImplementedException("Task 9");
+        Expression<Func<TDestination, TKey>> keySelector) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.OrderByDescending(Translate(keySelector)),
+            _configuration);
 
     public IUseAsDataSourceOrdered<TSource, TDestination> ThenBy<TKey>(
-        Expression<Func<TDestination, TKey>> keySelector) => throw new NotImplementedException("Task 9");
+        Expression<Func<TDestination, TKey>> keySelector) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            AsOrderedQueryable(_underlying).ThenBy(Translate(keySelector)),
+            _configuration);
 
     public IUseAsDataSourceOrdered<TSource, TDestination> ThenByDescending<TKey>(
-        Expression<Func<TDestination, TKey>> keySelector) => throw new NotImplementedException("Task 9");
+        Expression<Func<TDestination, TKey>> keySelector) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            AsOrderedQueryable(_underlying).ThenByDescending(Translate(keySelector)),
+            _configuration);
 
-    // Paging
-    public IUseAsDataSourceQueryable<TSource, TDestination> Skip(int count) => throw new NotImplementedException("Task 9");
-    public IUseAsDataSourceQueryable<TSource, TDestination> Take(int count) => throw new NotImplementedException("Task 9");
+    // ---- Paging ----
+    public IUseAsDataSourceQueryable<TSource, TDestination> Skip(int count) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(_underlying.Skip(count), _configuration);
 
-    // Terminal predicate
+    public IUseAsDataSourceQueryable<TSource, TDestination> Take(int count) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(_underlying.Take(count), _configuration);
+
+    // ---- Terminal predicate (Task 10 fills in) ----
     public bool Any() => throw new NotImplementedException("Task 10");
     public bool Any(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
     public bool All(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
@@ -67,10 +98,10 @@ internal sealed class UseAsDataSourceQueryable<TSource, TDestination>
     public TDestination? LastOrDefault() => throw new NotImplementedException("Task 10");
     public TDestination? LastOrDefault(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
 
-    // Escape hatch
+    // ---- Escape hatch (Task 10 fills in) ----
     public IQueryable<TDestination> AsQueryable() => throw new NotImplementedException("Task 10");
 
-    // IEnumerable
+    // ---- IEnumerable (Task 10 fills in) ----
     public IEnumerator<TDestination> GetEnumerator() => throw new NotImplementedException("Task 10");
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
