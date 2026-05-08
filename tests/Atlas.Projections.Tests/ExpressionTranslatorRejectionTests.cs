@@ -127,6 +127,22 @@ public class ExpressionTranslatorMemberRejectionTests
         Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("Status")
                                           && d.Reason.Contains("constant"));
     }
+
+    [Fact]
+    public void MidChainPairNotRegistered_ThrowsAtlasProjectionException()
+    {
+        // Outer (Order, OrderDto) is registered; inner (Customer, CustomerDto) is NOT.
+        var cfg = new MapperConfiguration(c => c.CreateMap<UEDS_MidChainSrc, UEDS_MidChainDto>());
+        Expression<Func<UEDS_MidChainDto, bool>> predicate = d => d.Customer.Name == "Alice";
+
+        var ex = Assert.Throws<AtlasProjectionException>(() =>
+            ExpressionTranslator.Translate(
+                cfg.Internal_Registry,
+                new TypePair(typeof(UEDS_MidChainSrc), typeof(UEDS_MidChainDto)),
+                predicate));
+
+        Assert.Contains(ex.Diagnostics, d => d.Reason.Contains("not registered"));
+    }
 }
 
 public class UEDS_MissingMemberSrc { public int Id { get; set; } }
@@ -137,3 +153,8 @@ public class UEDS_IgnoredDto { public int Id { get; set; } public decimal Comput
 
 public class UEDS_ConstantSrc { public int Id { get; set; } }
 public class UEDS_ConstantDto { public int Id { get; set; } public string Status { get; set; } = ""; }
+
+public class UEDS_MidChainCustomer { public string Name { get; set; } = ""; }
+public class UEDS_MidChainCustomerDto { public string Name { get; set; } = ""; }
+public class UEDS_MidChainSrc { public UEDS_MidChainCustomer Customer { get; set; } = new(); }
+public class UEDS_MidChainDto { public UEDS_MidChainCustomerDto Customer { get; set; } = new(); }

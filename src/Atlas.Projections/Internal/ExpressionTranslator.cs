@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Reflection;
 using Atlas.Internal;
 
 namespace Atlas.Projections.Internal;
@@ -81,17 +82,54 @@ internal static class ExpressionTranslator
 
         protected override Expression VisitMember(MemberExpression node)
         {
-            // Walk the spine: chain of MemberExpressions rooted at a single Expression.
-            // For Task 2 we handle the flat single-member case (length-1 spine rooted at _destParam).
-            if (node.Expression is ParameterExpression p && p == _destParam)
+            // Walk the spine: collect chain of MemberExpressions rooted at a single Expression.
+            var spine = new List<MemberInfo>();
+            Expression? current = node;
+            while (current is MemberExpression me)
             {
-                // Single-member spine: d.X
-                var pm = LookupPropertyMap(_rootPair, node.Member.Name);
-                return BuildSourceExpression(pm, _srcParam);
+                spine.Add(me.Member);
+                current = me.Expression;
+            }
+            // spine is currently outermost-first; reverse so it's innermost-first
+            // (e.g., d.Customer.Name → spine = [Customer, Name]).
+            spine.Reverse();
+
+            // Spine root must be the destination parameter for translation.
+            if (current is not ParameterExpression p || p != _destParam)
+            {
+                // Non-destination access (closure, sub-lambda parameter, etc.) — pass through.
+                return base.VisitMember(node);
             }
 
-            // Spine root is not _destParam (closure access, etc.) — pass through.
-            return base.VisitMember(node);
+            // Walk the spine left-to-right, threading (currentSrcExpr, currentTypePair).
+            Expression currentSrcExpr = _srcParam;
+            TypePair currentPair = _rootPair;
+
+            for (int i = 0; i < spine.Count; i++)
+            {
+                var memberName = spine[i].Name;
+                var pm = LookupPropertyMap(currentPair, memberName);
+                var resolved = BuildSourceExpression(pm, currentSrcExpr);
+
+                if (i == spine.Count - 1)
+                {
+                    // Last member; return the resolved expression.
+                    return resolved;
+                }
+
+                // More members to walk. Determine the next typepair from the resolved
+                // source expression's type and the destination property's declared type.
+                if (pm.DestinationProperty is null)
+                    throw Reject(currentPair.Source, currentPair.Destination, memberName,
+                        $"destination member '{currentPair.Destination.Name}.{memberName}' has no " +
+                        "DestinationProperty (constructor-only mapping cannot be walked through nested chains).");
+
+                currentSrcExpr = resolved;
+                currentPair = new TypePair(resolved.Type, pm.DestinationProperty.PropertyType);
+            }
+
+            // Unreachable: spine has at least one member (otherwise we wouldn't be in VisitMember).
+            throw new InvalidOperationException("Unreachable: spine was empty.");
         }
 
         private PropertyMap LookupPropertyMap(TypePair pair, string memberName)
@@ -114,7 +152,7 @@ internal static class ExpressionTranslator
         private Expression BuildSourceExpression(PropertyMap pm, Expression currentSrcExpr)
         {
             var srcType = currentSrcExpr.Type;
-            var dstType = _rootPair.Destination;
+            var dstType = pm.DestinationProperty?.DeclaringType ?? _rootPair.Destination;
 
             // Phase 3 rejection: Ignored member.
             if (pm.Ignored)

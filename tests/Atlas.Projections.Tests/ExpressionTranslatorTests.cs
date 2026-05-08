@@ -150,3 +150,31 @@ public class UEDS_CustomDto
 {
     public string DisplayName { get; set; } = "";
 }
+
+public class ExpressionTranslatorRecursiveTests
+{
+    [Fact]
+    public void NestedDtoChain_TranslatesViaTwoTypeMaps()
+    {
+        var cfg = new MapperConfiguration(c =>
+        {
+            c.CreateMap<UEDS_NestedSrc, UEDS_NestedDto>();
+            c.CreateMap<UEDS_NestedCustomer, UEDS_NestedCustomerDto>();
+        });
+        Expression<Func<UEDS_NestedDto, bool>> predicate = d => d.Customer.Name == "Alice";
+
+        var translated = (Expression<Func<UEDS_NestedSrc, bool>>)ExpressionTranslator.Translate(
+            cfg.Internal_Registry,
+            new TypePair(typeof(UEDS_NestedSrc), typeof(UEDS_NestedDto)),
+            predicate);
+
+        var compiled = translated.Compile();
+        Assert.True(compiled(new UEDS_NestedSrc { Customer = new UEDS_NestedCustomer { Name = "Alice" } }));
+        Assert.False(compiled(new UEDS_NestedSrc { Customer = new UEDS_NestedCustomer { Name = "Bob" } }));
+    }
+}
+
+public class UEDS_NestedCustomer { public string Name { get; set; } = ""; }
+public class UEDS_NestedCustomerDto { public string Name { get; set; } = ""; }
+public class UEDS_NestedSrc { public UEDS_NestedCustomer Customer { get; set; } = new(); }
+public class UEDS_NestedDto { public UEDS_NestedCustomerDto Customer { get; set; } = new(); }
