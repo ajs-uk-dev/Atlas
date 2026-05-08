@@ -98,6 +98,37 @@ public class UseAsDataSourceCompatibilityTests
         var list = src.UseAsDataSource(cfg).For<UEDS_TransDto>().ToList();
         Assert.Equal("Alice!", list[0].Name);
     }
+
+    [Fact]
+    public void NullSubstitute_NotAppliedInPredicateTranslation_v1Limitation()
+    {
+        // Locks in current v1 behavior: ExpressionTranslator.BuildSourceExpression does not
+        // consult pm.NullSubstitute, so Where(d => d.Email == "(none)") translates to
+        // Where(s => s.Email == "(none)") and never matches null-source rows.
+        //
+        // ProjectionPlanBuilder DOES apply NullSubstitute Coalesce wrapping during projection
+        // — see the NullSubstitute_CoalesceAppliedInProjection test above. The projection path
+        // works; the predicate path doesn't (in v1).
+        //
+        // When predicate-path Coalesce support lands in v2, this test should be UPDATED to
+        // assert the row IS matched. Until then, the asymmetry is intentional.
+        var cfg = new MapperConfiguration(c =>
+            c.CreateMap<UEDS_NullSubSrc, UEDS_NullSubDto>()
+                .ForMember(d => d.Email, opt =>
+                {
+                    opt.MapFrom(s => s.Email);
+                    opt.NullSubstitute("(none)");
+                }));
+
+        var src = new[] { new UEDS_NullSubSrc { Id = 1, Email = null } }.AsQueryable();
+        var matched = src.UseAsDataSource(cfg).For<UEDS_NullSubDto>()
+            .Where(d => d.Email == "(none)")
+            .ToList();
+
+        // v1 limitation: predicate path doesn't see the substitute, so the null-email row
+        // does NOT match.
+        Assert.Empty(matched);
+    }
 }
 
 [AutoMap(typeof(UEDS_AttrSrc))]
