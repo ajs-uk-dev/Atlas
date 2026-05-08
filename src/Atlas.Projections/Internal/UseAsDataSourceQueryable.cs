@@ -77,31 +77,47 @@ internal sealed class UseAsDataSourceQueryable<TSource, TDestination>
     public IUseAsDataSourceQueryable<TSource, TDestination> Take(int count) =>
         new UseAsDataSourceQueryable<TSource, TDestination>(_underlying.Take(count), _configuration);
 
-    // ---- Terminal predicate (Task 10 fills in) ----
-    public bool Any() => throw new NotImplementedException("Task 10");
-    public bool Any(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public bool All(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public int Count() => throw new NotImplementedException("Task 10");
-    public int Count(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public long LongCount() => throw new NotImplementedException("Task 10");
-    public long LongCount(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination First() => throw new NotImplementedException("Task 10");
-    public TDestination First(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination? FirstOrDefault() => throw new NotImplementedException("Task 10");
-    public TDestination? FirstOrDefault(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination Single() => throw new NotImplementedException("Task 10");
-    public TDestination Single(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination? SingleOrDefault() => throw new NotImplementedException("Task 10");
-    public TDestination? SingleOrDefault(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination Last() => throw new NotImplementedException("Task 10");
-    public TDestination Last(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
-    public TDestination? LastOrDefault() => throw new NotImplementedException("Task 10");
-    public TDestination? LastOrDefault(Expression<Func<TDestination, bool>> predicate) => throw new NotImplementedException("Task 10");
+    // ---- Terminal predicate ----
+    public bool Any() => _underlying.Any();
+    public bool Any(Expression<Func<TDestination, bool>> predicate) => _underlying.Any(Translate(predicate));
+    public bool All(Expression<Func<TDestination, bool>> predicate) => _underlying.All(Translate(predicate));
 
-    // ---- Escape hatch (Task 10 fills in) ----
-    public IQueryable<TDestination> AsQueryable() => throw new NotImplementedException("Task 10");
+    public int Count() => _underlying.Count();
+    public int Count(Expression<Func<TDestination, bool>> predicate) => _underlying.Count(Translate(predicate));
+    public long LongCount() => _underlying.LongCount();
+    public long LongCount(Expression<Func<TDestination, bool>> predicate) => _underlying.LongCount(Translate(predicate));
 
-    // ---- IEnumerable (Task 10 fills in) ----
-    public IEnumerator<TDestination> GetEnumerator() => throw new NotImplementedException("Task 10");
+    public TDestination First() => AsQueryable().First();
+    public TDestination First(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().First();
+    public TDestination? FirstOrDefault() => AsQueryable().FirstOrDefault();
+    public TDestination? FirstOrDefault(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().FirstOrDefault();
+
+    public TDestination Single() => AsQueryable().Single();
+    public TDestination Single(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().Single();
+    public TDestination? SingleOrDefault() => AsQueryable().SingleOrDefault();
+    public TDestination? SingleOrDefault(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().SingleOrDefault();
+
+    public TDestination Last() => AsQueryable().Last();
+    public TDestination Last(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().Last();
+    public TDestination? LastOrDefault() => AsQueryable().LastOrDefault();
+    public TDestination? LastOrDefault(Expression<Func<TDestination, bool>> predicate) =>
+        new UseAsDataSourceQueryable<TSource, TDestination>(
+            _underlying.Where(Translate(predicate)), _configuration).AsQueryable().LastOrDefault();
+
+    // ---- Escape hatch ----
+    public IQueryable<TDestination> AsQueryable() => _underlying.ProjectTo<TDestination>(_configuration);
+
+    // ---- IEnumerable ----
+    public IEnumerator<TDestination> GetEnumerator() => AsQueryable().GetEnumerator();
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
