@@ -79,3 +79,33 @@ public class UseAsDataSourceCacheTests
 
 public class UEDS_CacheSrc { public decimal Total { get; set; } }
 public class UEDS_CacheDto { public decimal Total { get; set; } }
+
+public class TranslateExtensionTests
+{
+    [Fact]
+    public void Translate_ReturnsStronglyTypedExpression()
+    {
+        var cfg = new MapperConfiguration(c => c.CreateMap<UEDS_CacheSrc, UEDS_CacheDto>());
+
+        Expression<Func<UEDS_CacheDto, bool>> destExpr = d => d.Total > 100m;
+        Expression<Func<UEDS_CacheSrc, bool>> srcExpr =
+            cfg.Translate<UEDS_CacheSrc, UEDS_CacheDto, bool>(destExpr);
+
+        var compiled = srcExpr.Compile();
+        Assert.True(compiled(new UEDS_CacheSrc { Total = 150m }));
+        Assert.False(compiled(new UEDS_CacheSrc { Total = 50m }));
+    }
+
+    [Fact]
+    public void UseAsDataSource_ReturnsIntermediate_ForReturnsWrapper()
+    {
+        var cfg = new MapperConfiguration(c => c.CreateMap<UEDS_CacheSrc, UEDS_CacheDto>());
+        var queryable = new[] { new UEDS_CacheSrc { Total = 150m } }.AsQueryable();
+
+        var intermediate = queryable.UseAsDataSource(cfg);
+        Assert.NotNull(intermediate);
+
+        var wrapper = intermediate.For<UEDS_CacheDto>();
+        Assert.NotNull(wrapper);
+    }
+}
