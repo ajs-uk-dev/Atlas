@@ -8,8 +8,8 @@ namespace Atlas;
 /// <remarks>
 /// Discovered by <see cref="MapperConfigurationExpression.AddMaps(System.Reflection.Assembly[])"/>
 /// during the same scan that finds <see cref="MapperProfile"/> subclasses. Member-level
-/// customization comes from <see cref="IgnoreAttribute"/>, <see cref="SourceMemberAttribute"/>,
-/// and <see cref="NullSubstituteAttribute"/> on the decorated class's properties.
+/// customization comes from <see cref="SkipAttribute"/>, <see cref="FromAttribute"/>,
+/// and <see cref="DefaultWhenNullAttribute"/> on the decorated class's properties.
 /// Configuring the same (TSource, TDestination) pair both via attributes AND via fluent
 /// <c>CreateMap</c> throws <see cref="AtlasConfigurationException"/> at registration time.
 /// </remarks>

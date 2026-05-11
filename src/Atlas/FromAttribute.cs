@@ -15,9 +15,9 @@ namespace Atlas;
 /// was looked up on.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = false)]
-public sealed class SourceMemberAttribute : Attribute
+public sealed class FromAttribute : Attribute
 {
-    public SourceMemberAttribute(string memberName)
+    public FromAttribute(string memberName)
     {
         ArgumentNullException.ThrowIfNull(memberName);
         MemberName = memberName;

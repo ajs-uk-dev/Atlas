@@ -52,7 +52,7 @@ public class AttributeIntegrationTests
     }
 
     [Fact]
-    public void IgnoreShortCircuits_OnPropertyAlsoBearingSourceMemberOrNullSubstitute()
+    public void SkipShortCircuits_OnPropertyAlsoBearingFromOrDefaultWhenNull()
     {
         var mapper = BuildMapper(typeof(IntegrationShortCircuitDto));
         var dto = mapper.Map<IntegrationShortCircuitDto>(new IntegrationShortCircuitSource
@@ -118,14 +118,14 @@ public class IntegrationDto
 {
     public int Id { get; set; }
 
-    [SourceMember("Customer.FirstName")]
+    [From("Customer.FirstName")]
     public string CustomerFirstName { get; set; } = "";
 
-    [SourceMember("Customer.Email")]
-    [NullSubstitute("(no email)")]
+    [From("Customer.Email")]
+    [DefaultWhenNull("(no email)")]
     public string CustomerEmail { get; set; } = "";
 
-    [Ignore]
+    [Skip]
     public string? SkippedField { get; set; }
 }
 
@@ -137,9 +137,9 @@ public class IntegrationShortCircuitSource
 [Map(typeof(IntegrationShortCircuitSource))]
 public class IntegrationShortCircuitDto
 {
-    [Ignore]
-    [SourceMember("Customer.FirstName")]
-    [NullSubstitute("(unreachable)")]
+    [Skip]
+    [From("Customer.FirstName")]
+    [DefaultWhenNull("(unreachable)")]
     public string? SkippedDespiteAttributes { get; set; }
 }
 

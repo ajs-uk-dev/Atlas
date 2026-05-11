@@ -141,9 +141,9 @@ internal static class AttributeScanner
     }
 
     /// <summary>
-    /// Iterates destination properties and applies [Ignore] / [SourceMember] / [NullSubstitute]
+    /// Iterates destination properties and applies [Skip] / [From] / [DefaultWhenNull]
     /// per-property via reflection-built ForMember invocations. See design §5.4.
-    /// Task 6: handles [Ignore] only. [SourceMember] lands in Task 7; [NullSubstitute] in Task 8.
+    /// Task 6: handles [Skip] only. [From] lands in Task 7; [DefaultWhenNull] in Task 8.
     /// </summary>
     private static void ApplyMemberAttributes(object mappingExpression, Type srcType, Type dstType, List<ConfigurationError> errors)
     {
@@ -154,9 +154,9 @@ internal static class AttributeScanner
 
         foreach (var prop in dstType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            var ignore = prop.GetCustomAttribute<IgnoreAttribute>(inherit: false);
-            var sourceMember = prop.GetCustomAttribute<SourceMemberAttribute>(inherit: false);
-            var nullSubstitute = prop.GetCustomAttribute<NullSubstituteAttribute>(inherit: false);
+            var ignore = prop.GetCustomAttribute<SkipAttribute>(inherit: false);
+            var sourceMember = prop.GetCustomAttribute<FromAttribute>(inherit: false);
+            var nullSubstitute = prop.GetCustomAttribute<DefaultWhenNullAttribute>(inherit: false);
 
             if (ignore is null && sourceMember is null && nullSubstitute is null)
                 continue;
@@ -170,7 +170,7 @@ internal static class AttributeScanner
 
             if (ignore is not null)
             {
-                // [Ignore] short-circuits — emit only Ignore() and ignore other attributes on this property.
+                // [Skip] short-circuits — emit only Ignore() and ignore other attributes on this property.
                 var ignoreMethod = imemberConfigClosed.GetMethod(IgnoreMethodName, Type.EmptyTypes)!;
                 statements.Add(Expression.Call(optParam, ignoreMethod));
             }
@@ -211,7 +211,7 @@ internal static class AttributeScanner
                         && ValidateNullSubstituteCompatibility(resolvedSourceType, nullSubstitute.ConstantValue,
                                                                srcType, dstType, prop.Name, errors))
                     {
-                        // If no [SourceMember] was present, emit MapFrom with the convention-resolved path
+                        // If no [From] was present, emit MapFrom with the convention-resolved path
                         // so the property map has a source expression. Without this, the convention engine
                         // would skip the property (already in existingNames) leaving SourcePath = null,
                         // and ExecutionPlanBuilder would skip the assignment entirely.
@@ -289,7 +289,7 @@ internal static class AttributeScanner
     }
 
     /// <summary>
-    /// Eager validator for [NullSubstitute] per design §6 rules 5 &amp; 6. Returns true
+    /// Eager validator for [DefaultWhenNull] per design §6 rules 5 &amp; 6. Returns true
     /// if the substitute is compatible; appends a structured error and returns false
     /// otherwise.
     /// </summary>
@@ -306,7 +306,7 @@ internal static class AttributeScanner
         if (!isReferenceType && !isNullable)
         {
             errors.Add(new(srcType, dstType, destMemberName,
-                $"[NullSubstitute({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
+                $"[DefaultWhenNull({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
                 $"source-member type '{sourceMemberType.Name}' is non-nullable; the substitute is unreachable. " +
                 $"Use a different default mechanism or remove the attribute."));
             return false;
@@ -322,7 +322,7 @@ internal static class AttributeScanner
             if (!IsNumericallyCoercible(constantType, targetType))
             {
                 errors.Add(new(srcType, dstType, destMemberName,
-                    $"[NullSubstitute({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
+                    $"[DefaultWhenNull({FormatConstant(constantValue)})] on '{dstType.Name}.{destMemberName}' — " +
                     $"substitute type '{constantType.Name}' is not assignable to source-member type " +
                     $"'{(isNullable ? $"Nullable<{targetType.Name}>" : targetType.Name)}'."));
                 return false;
@@ -511,7 +511,7 @@ internal static class AttributeScanner
             if (prop is null && field is null)
             {
                 errors.Add(new(srcType, decoratedType, destMemberName,
-                    $"[SourceMember(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
+                    $"[From(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
                     $"segment '{segment}' not found on '{currentType.Name}'."));
                 return null;
             }
@@ -519,7 +519,7 @@ internal static class AttributeScanner
             if (prop is { CanRead: false })
             {
                 errors.Add(new(srcType, decoratedType, destMemberName,
-                    $"[SourceMember(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
+                    $"[From(\"{dottedPath}\")] on '{decoratedType.Name}.{destMemberName}' — " +
                     $"segment '{segment}' on '{currentType.Name}' has no public getter."));
                 return null;
             }

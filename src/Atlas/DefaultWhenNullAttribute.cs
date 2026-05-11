@@ -13,9 +13,9 @@ namespace Atlas;
 /// <c>null</c> as the substitute value.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = false)]
-public sealed class NullSubstituteAttribute : Attribute
+public sealed class DefaultWhenNullAttribute : Attribute
 {
-    public NullSubstituteAttribute(object constantValue)
+    public DefaultWhenNullAttribute(object constantValue)
     {
         ArgumentNullException.ThrowIfNull(constantValue);
         ConstantValue = constantValue;

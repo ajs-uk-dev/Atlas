@@ -30,7 +30,7 @@ public class AttributeProjectionTests
     }
 
     [Fact]
-    public void IgnoreAttribute_ExcludesMemberFromProjection()
+    public void SkipAttribute_ExcludesMemberFromProjection()
     {
         var cfg = BuildConfig(typeof(ProjectionIgnoreDto));
         var src = new[]
@@ -43,7 +43,7 @@ public class AttributeProjectionTests
     }
 
     [Fact]
-    public void SourceMember_DottedPath_ProjectsAsNavigation()
+    public void From_DottedPath_ProjectsAsNavigation()
     {
         var cfg = BuildConfig(typeof(ProjectionDottedDto));
         var src = new[]
@@ -55,7 +55,7 @@ public class AttributeProjectionTests
     }
 
     [Fact]
-    public void NullSubstitute_TranslatesToCoalesce()
+    public void DefaultWhenNull_TranslatesToCoalesce()
     {
         var cfg = BuildConfig(typeof(ProjectionNullSubDto));
         var src = new[]
@@ -88,7 +88,7 @@ public class ProjectionAttrDto { public int Id { get; set; } public string Name 
 
 public class ProjectionIgnoreSource { public int Id { get; set; } public string? Skipped { get; set; } }
 [Map(typeof(ProjectionIgnoreSource))]
-public class ProjectionIgnoreDto { public int Id { get; set; } [Ignore] public string? Skipped { get; set; } }
+public class ProjectionIgnoreDto { public int Id { get; set; } [Skip] public string? Skipped { get; set; } }
 
 public class ProjectionDottedCustomer { public string Name { get; set; } = ""; }
 public class ProjectionDottedSource { public int Id { get; set; } public ProjectionDottedCustomer Customer { get; set; } = new(); }
@@ -96,7 +96,7 @@ public class ProjectionDottedSource { public int Id { get; set; } public Project
 public class ProjectionDottedDto
 {
     public int Id { get; set; }
-    [SourceMember("Customer.Name")] public string CustomerName { get; set; } = "";
+    [From("Customer.Name")] public string CustomerName { get; set; } = "";
 }
 
 public class ProjectionNullSubSource { public int Id { get; set; } public string? MaybeName { get; set; } }
@@ -104,8 +104,8 @@ public class ProjectionNullSubSource { public int Id { get; set; } public string
 public class ProjectionNullSubDto
 {
     public int Id { get; set; }
-    [SourceMember(nameof(ProjectionNullSubSource.MaybeName))]
-    [NullSubstitute("(none)")]
+    [From(nameof(ProjectionNullSubSource.MaybeName))]
+    [DefaultWhenNull("(none)")]
     public string Name { get; set; } = "";
 }
 

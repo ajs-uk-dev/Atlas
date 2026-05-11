@@ -436,13 +436,13 @@ public class OrderDto
 {
     public int Id { get; init; }
 
-    [SourceMember("Customer.Name")]
+    [From("Customer.Name")]
     public string CustomerName { get; init; } = "";
 
-    [Ignore]
+    [Skip]
     public decimal Total { get; init; }
 
-    [NullSubstitute("(no email)")]
+    [DefaultWhenNull("(no email)")]
     public string Email { get; init; } = "";
 }
 
@@ -458,9 +458,9 @@ services.AddAtlas(typeof(OrderDto).Assembly);
 | Validation policy | `[Map(MemberList = MemberList.Source)]` |
 | Auto-reverse | `[Map(ReverseMap = true)]` |
 | Cycle-safe (PreserveReferences) | `[Map(PreserveReferences = true)]` |
-| Skip member | `[Ignore]` |
-| Source-member redirect | `[SourceMember("Customer.Name")]` (incl. dotted paths) |
-| Null fallback | `[NullSubstitute("default")]` |
+| Skip member | `[Skip]` |
+| Source-member redirect | `[From("Customer.Name")]` (incl. dotted paths) |
+| Null fallback | `[DefaultWhenNull("default")]` |
 
 ### What attributes can't express
 
@@ -548,7 +548,7 @@ var orders = db.Orders.Where(srcPredicate).ProjectTo<OrderDto>(mapperConfig).ToL
 
 Predicates against destination members that have no source mapping throw `AtlasProjectionException` at the operator call site:
 
-- `[Ignore]`'d members → "destination member 'OrderDto.X' is configured with Ignore() and cannot be referenced in a UseAsDataSource expression."
+- `[Skip]`'d members → "destination member 'OrderDto.X' is configured with Ignore() and cannot be referenced in a UseAsDataSource expression."
 - Constant-mapped members (`MapFrom("active")`) → "destination member 'OrderDto.Status' is a constant; predicates against it are trivially true/false."
 - Unmapped members (no convention or fluent source) → "destination member 'OrderDto.X' has no PropertyMap."
 

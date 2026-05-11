@@ -223,10 +223,10 @@ public class OrderDto
 {
     public int Id { get; init; }
 
-    [SourceMember("Customer.Name")]
+    [From("Customer.Name")]
     public string CustomerName { get; init; } = "";
 
-    [Ignore]
+    [Skip]
     public decimal Total { get; init; }
 }
 ```
@@ -1160,13 +1160,13 @@ public class OrderDto
 {
     public int Id { get; init; }
 
-    [SourceMember("Customer.Name")]
+    [From("Customer.Name")]
     public string CustomerName { get; init; } = "";
 
-    [Ignore]
+    [Skip]
     public decimal Total { get; init; }
 
-    [NullSubstitute("(no email)")]
+    [DefaultWhenNull("(no email)")]
     public string Email { get; init; } = "";
 }
 
@@ -1188,21 +1188,21 @@ public class OrderDto { ... }
 
 | Attribute | Equivalent fluent |
 |---|---|
-| `[Ignore]` | `ForMember(d => d.X, opt => opt.Ignore())` |
-| `[SourceMember("Path")]` | `ForMember(d => d.X, opt => opt.MapFrom(s => s.Path))` (with dotted-path support) |
-| `[NullSubstitute(value)]` | `ForMember(d => d.X, opt => opt.NullSubstitute(value))` |
+| `[Skip]` | `ForMember(d => d.X, opt => opt.Ignore())` |
+| `[From("Path")]` | `ForMember(d => d.X, opt => opt.MapFrom(s => s.Path))` (with dotted-path support) |
+| `[DefaultWhenNull(value)]` | `ForMember(d => d.X, opt => opt.NullSubstitute(value))` |
 
 ### Combining attributes
 
 Multiple attributes on one property:
 
 ```csharp
-[SourceMember("Customer.Email")]
-[NullSubstitute("(no email)")]
+[From("Customer.Email")]
+[DefaultWhenNull("(no email)")]
 public string CustomerEmail { get; init; } = "";
 ```
 
-`[Ignore]` short-circuits — when `[Ignore]` is present, other attributes on the same property are unreachable.
+`[Skip]` short-circuits — when `[Skip]` is present, other attributes on the same property are unreachable.
 
 ### What attributes can express
 
@@ -1212,9 +1212,9 @@ public string CustomerEmail { get; init; } = "";
 | Validation policy | `[Map(MemberList = ...)]` |
 | Auto-reverse | `[Map(ReverseMap = true)]` |
 | Cycle-safe | `[Map(PreserveReferences = true)]` |
-| Skip member | `[Ignore]` |
-| Source-member redirect | `[SourceMember("name")]` (supports dotted paths) |
-| Null fallback | `[NullSubstitute("default")]` |
+| Skip member | `[Skip]` |
+| Source-member redirect | `[From("name")]` (supports dotted paths) |
+| Null fallback | `[DefaultWhenNull("default")]` |
 
 ### What attributes can't express
 
@@ -1298,7 +1298,7 @@ var orders = db.Orders.Where(srcPredicate).ProjectTo<OrderDto>(mapperConfig).ToL
 
 Predicates against destination members that have no source mapping throw `AtlasProjectionException` at the operator call site:
 
-- `[Ignore]`'d members → "destination member 'OrderDto.X' is configured with Ignore() and cannot be referenced in a UseAsDataSource expression."
+- `[Skip]`'d members → "destination member 'OrderDto.X' is configured with Ignore() and cannot be referenced in a UseAsDataSource expression."
 - Constant-mapped members (`MapFrom("active")`) → "destination member 'OrderDto.Status' is a constant; predicates against it are trivially true/false."
 - Unmapped members (no convention or fluent source) → "destination member 'OrderDto.X' has no PropertyMap."
 
