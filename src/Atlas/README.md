@@ -428,10 +428,10 @@ See `docs/Atlas-Design-DynamicMapping.md` for the full specification.
 
 ## Attribute-based configuration
 
-Decorate destination classes with `[AutoMap(typeof(SourceType))]` to declare mappings without writing a profile. Attributes coexist with profiles; both are discovered by `cfg.AddMaps(asm)` and `services.AddAtlas(asm)`.
+Decorate destination classes with `[Map(typeof(SourceType))]` to declare mappings without writing a profile. Attributes coexist with profiles; both are discovered by `cfg.AddMaps(asm)` and `services.AddAtlas(asm)`.
 
 ```csharp
-[AutoMap(typeof(Order))]
+[Map(typeof(Order))]
 public class OrderDto
 {
     public int Id { get; init; }
@@ -447,17 +447,17 @@ public class OrderDto
 }
 
 services.AddAtlas(typeof(OrderDto).Assembly);
-// Discovers OrderDto via [AutoMap]; mapping is convention + member-attribute driven.
+// Discovers OrderDto via [Map]; mapping is convention + member-attribute driven.
 ```
 
 ### What attributes can express
 
 | Feature | Attribute |
 | --- | --- |
-| Class declaration | `[AutoMap(typeof(SourceType))]` |
-| Validation policy | `[AutoMap(MemberList = MemberList.Source)]` |
-| Auto-reverse | `[AutoMap(ReverseMap = true)]` |
-| Cycle-safe (PreserveReferences) | `[AutoMap(PreserveReferences = true)]` |
+| Class declaration | `[Map(typeof(SourceType))]` |
+| Validation policy | `[Map(MemberList = MemberList.Source)]` |
+| Auto-reverse | `[Map(ReverseMap = true)]` |
+| Cycle-safe (PreserveReferences) | `[Map(PreserveReferences = true)]` |
 | Skip member | `[Ignore]` |
 | Source-member redirect | `[SourceMember("Customer.Name")]` (incl. dotted paths) |
 | Null fallback | `[NullSubstitute("default")]` |

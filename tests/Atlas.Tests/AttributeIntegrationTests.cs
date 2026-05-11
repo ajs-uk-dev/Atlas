@@ -113,7 +113,7 @@ public class IntegrationSource
     public string? Skipped { get; set; }
 }
 
-[AutoMap(typeof(IntegrationSource), MemberList = MemberList.Destination)]
+[Map(typeof(IntegrationSource), MemberList = MemberList.Destination)]
 public class IntegrationDto
 {
     public int Id { get; set; }
@@ -134,7 +134,7 @@ public class IntegrationShortCircuitSource
     public IntegrationCustomer Customer { get; set; } = new();
 }
 
-[AutoMap(typeof(IntegrationShortCircuitSource))]
+[Map(typeof(IntegrationShortCircuitSource))]
 public class IntegrationShortCircuitDto
 {
     [Ignore]
@@ -144,7 +144,7 @@ public class IntegrationShortCircuitDto
 }
 
 public class IntegrationReverseSource { public int Id { get; set; } }
-[AutoMap(typeof(IntegrationReverseSource), ReverseMap = true)]
+[Map(typeof(IntegrationReverseSource), ReverseMap = true)]
 public class IntegrationReverseDto { public int Id { get; set; } }
 
 public class IntegrationCycleSource
@@ -152,7 +152,7 @@ public class IntegrationCycleSource
     public int Id { get; set; }
     public IntegrationCycleSource? Self { get; set; }
 }
-[AutoMap(typeof(IntegrationCycleSource), PreserveReferences = true)]
+[Map(typeof(IntegrationCycleSource), PreserveReferences = true)]
 public class IntegrationCycleDto
 {
     public int Id { get; set; }

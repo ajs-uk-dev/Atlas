@@ -54,7 +54,7 @@ public class MapperConfigurationExpressionTests
     {
         var expr = new MapperConfigurationExpression();
         // Tolerate AtlasConfigurationException thrown by bad-fixture pollution from Task 3
-        // ([AutoMap] duplicates in the test assembly). Profile discovery — which is what this
+        // ([Map] duplicates in the test assembly). Profile discovery — which is what this
         // test asserts — completes before the attribute-scanner phase that throws.
         try { expr.AddMaps<MapperConfigurationExpressionTests>(); }
         catch (AtlasConfigurationException) { }
@@ -72,7 +72,7 @@ public class MapperConfigurationExpressionTests
         var expr = new MapperConfigurationExpression();
         var asm = typeof(MapperConfigurationExpressionTests).Assembly;
         // Tolerate AtlasConfigurationException thrown by bad-fixture pollution from Task 3
-        // ([AutoMap] duplicates in the test assembly). The distinct-assembly deduplication
+        // ([Map] duplicates in the test assembly). The distinct-assembly deduplication
         // behavior — what this test asserts — is applied before the attribute-scanner phase.
         try { expr.AddMaps(asm, asm); } // intentional duplicate
         catch (AtlasConfigurationException) { }

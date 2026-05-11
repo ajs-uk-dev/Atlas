@@ -7,7 +7,7 @@ namespace Atlas;
 /// </summary>
 /// <remarks>
 /// Has effect only when applied to a property of a class decorated with
-/// <see cref="AutoMapAttribute"/>. Silently no-op otherwise (no error). Combined with
+/// <see cref="MapAttribute"/>. Silently no-op otherwise (no error). Combined with
 /// <see cref="SourceMemberAttribute"/> or <see cref="NullSubstituteAttribute"/> on the
 /// same property, <see cref="IgnoreAttribute"/> short-circuits — the property is never
 /// assigned, so the other attributes' configuration is unreachable.

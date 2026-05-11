@@ -131,7 +131,7 @@ public class OrderController(IMapper mapper) : ControllerBase
 
 `services.AddAtlas(asm)` does five things in order:
 1. Scans the assembly (or assemblies) for `MapperProfile` subclasses.
-2. Scans the same assemblies for `[AutoMap]`-decorated types.
+2. Scans the same assemblies for `[Map]`-decorated types.
 3. Registers `MapperConfiguration` as singleton.
 4. Compiles all maps eagerly (`CompileMappings()`).
 5. Registers `IMapper` as transient (cheap; wraps the singleton config).
@@ -218,7 +218,7 @@ public class OrderProfile : MapperProfile
 ### 2. Attributes
 
 ```csharp
-[AutoMap(typeof(Order))]
+[Map(typeof(Order))]
 public class OrderDto
 {
     public int Id { get; init; }
@@ -255,7 +255,7 @@ cfg.AddMaps(typeof(OrderProfile).Assembly);
 services.AddAtlas(typeof(OrderProfile).Assembly);
 ```
 
-Both scan for `MapperProfile` subclasses AND `[AutoMap]`-decorated types in the named assemblies.
+Both scan for `MapperProfile` subclasses AND `[Map]`-decorated types in the named assemblies.
 
 ### Conflict rule
 
@@ -1150,12 +1150,12 @@ The instance cache is per-`Map<>` call. Each top-level `mapper.Map<>()` invocati
 
 ## 14.12 Attribute-Based Configuration
 
-Decorate destination classes with `[AutoMap(typeof(SourceType))]` to declare mappings without writing a profile.
+Decorate destination classes with `[Map(typeof(SourceType))]` to declare mappings without writing a profile.
 
 ### Basic example
 
 ```csharp
-[AutoMap(typeof(Order))]
+[Map(typeof(Order))]
 public class OrderDto
 {
     public int Id { get; init; }
@@ -1171,13 +1171,13 @@ public class OrderDto
 }
 
 services.AddAtlas(typeof(OrderDto).Assembly);
-// Discovers OrderDto via [AutoMap]; mapping is convention + member-attribute driven.
+// Discovers OrderDto via [Map]; mapping is convention + member-attribute driven.
 ```
 
 ### Class-level options
 
 ```csharp
-[AutoMap(typeof(Order),
+[Map(typeof(Order),
          MemberList = MemberList.Source,
          ReverseMap = true,
          PreserveReferences = true)]
@@ -1208,10 +1208,10 @@ public string CustomerEmail { get; init; } = "";
 
 | Feature | Attribute |
 |---|---|
-| Class declaration | `[AutoMap(typeof(SourceType))]` |
-| Validation policy | `[AutoMap(MemberList = ...)]` |
-| Auto-reverse | `[AutoMap(ReverseMap = true)]` |
-| Cycle-safe | `[AutoMap(PreserveReferences = true)]` |
+| Class declaration | `[Map(typeof(SourceType))]` |
+| Validation policy | `[Map(MemberList = ...)]` |
+| Auto-reverse | `[Map(ReverseMap = true)]` |
+| Cycle-safe | `[Map(PreserveReferences = true)]` |
 | Skip member | `[Ignore]` |
 | Source-member redirect | `[SourceMember("name")]` (supports dotted paths) |
 | Null fallback | `[NullSubstitute("default")]` |

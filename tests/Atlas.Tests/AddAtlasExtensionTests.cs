@@ -9,7 +9,7 @@ public class AddAtlasExtensionTests
     public void AddAtlas_RegistersIMapperAsSingleton()
     {
         var services = new ServiceCollection();
-        // Use configure-callback with try/catch to absorb bad-fixture [AutoMap] pollution from
+        // Use configure-callback with try/catch to absorb bad-fixture [Map] pollution from
         // other tests in this assembly (open generics, NullSubstitute mismatches, etc.).
         services.AddAtlas(c => { try { c.AddMaps(typeof(AddAtlasExtensionTests).Assembly); } catch (AtlasConfigurationException) { } });
 
@@ -90,7 +90,7 @@ public class AddAtlasExtensionTests
     {
         var services = new ServiceCollection();
         var asm = typeof(AddAtlasMarker).Assembly;
-        // Use configure-callback with try/catch to absorb bad-fixture [AutoMap] pollution.
+        // Use configure-callback with try/catch to absorb bad-fixture [Map] pollution.
         // Pass the same assembly twice to verify duplicate-scan deduplication still works.
         services.AddAtlas(c => { try { c.AddMaps(asm, asm); } catch (AtlasConfigurationException) { } });
 
@@ -120,7 +120,7 @@ public class AddAtlasExtensionTests
     [Fact]
     public void AddAtlas_AfterAdded_AssertConfigurationIsValid_Passes()
     {
-        // Register only DiProfile (no assembly scan) to avoid bad-fixture [AutoMap] pollution
+        // Register only DiProfile (no assembly scan) to avoid bad-fixture [Map] pollution
         // that would leave partial registrations failing AssertConfigurationIsValid.
         var services = new ServiceCollection();
         services.AddAtlas(c => c.AddProfile<DiProfile>());

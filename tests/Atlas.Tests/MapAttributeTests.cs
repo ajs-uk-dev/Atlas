@@ -2,25 +2,25 @@ using System.Reflection;
 
 namespace Atlas.Tests;
 
-public class AutoMapAttributeTests
+public class MapAttributeTests
 {
     [Fact]
     public void Ctor_NullSourceType_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new AutoMapAttribute(null!));
+        Assert.Throws<ArgumentNullException>(() => new MapAttribute(null!));
     }
 
     [Fact]
     public void Ctor_SourceTypeAssigned()
     {
-        var attr = new AutoMapAttribute(typeof(string));
+        var attr = new MapAttribute(typeof(string));
         Assert.Equal(typeof(string), attr.SourceType);
     }
 
     [Fact]
     public void Defaults_MemberListIsDestination_FlagsAreFalse()
     {
-        var attr = new AutoMapAttribute(typeof(string));
+        var attr = new MapAttribute(typeof(string));
         Assert.Equal(MemberList.Destination, attr.MemberList);
         Assert.False(attr.ReverseMap);
         Assert.False(attr.PreserveReferences);
@@ -29,7 +29,7 @@ public class AutoMapAttributeTests
     [Fact]
     public void Properties_AreSettable()
     {
-        var attr = new AutoMapAttribute(typeof(string))
+        var attr = new MapAttribute(typeof(string))
         {
             MemberList = MemberList.Source,
             ReverseMap = true,
@@ -43,7 +43,7 @@ public class AutoMapAttributeTests
     [Fact]
     public void AttributeUsage_TargetsClassOnly_NotInheritedNotMultiple()
     {
-        var usage = typeof(AutoMapAttribute).GetCustomAttribute<AttributeUsageAttribute>();
+        var usage = typeof(MapAttribute).GetCustomAttribute<AttributeUsageAttribute>();
         Assert.NotNull(usage);
         Assert.Equal(AttributeTargets.Class, usage!.ValidOn);
         Assert.False(usage.Inherited);
@@ -53,11 +53,11 @@ public class AutoMapAttributeTests
     [Fact]
     public void Sealed()
     {
-        Assert.True(typeof(AutoMapAttribute).IsSealed);
+        Assert.True(typeof(MapAttribute).IsSealed);
     }
 }
 
-public class AutoMapAttributeBehaviorTests
+public class MapAttributeBehaviorTests
 {
     [Fact]
     public void AttributeMap_RegistrationOrigin_NamesAttribute()
@@ -68,7 +68,7 @@ public class AutoMapAttributeBehaviorTests
         var tm = expr.GetTypeMaps()
                      .First(t => t.SourceType == typeof(Task5_MinimumSource)
                               && t.DestinationType == typeof(Task5_MinimumDto));
-        Assert.Contains("[AutoMap", tm.RegistrationOrigin);
+        Assert.Contains("[Map", tm.RegistrationOrigin);
         Assert.Contains(nameof(Task5_MinimumDto), tm.RegistrationOrigin);
     }
 
@@ -111,26 +111,26 @@ public class AutoMapAttributeBehaviorTests
 }
 
 public class Task5_MinimumSource { public int Id { get; set; } }
-[AutoMap(typeof(Task5_MinimumSource))]
+[Map(typeof(Task5_MinimumSource))]
 public class Task5_MinimumDto { public int Id { get; set; } }
 
 public class Task5_PreserveSource { public int Id { get; set; } }
-[AutoMap(typeof(Task5_PreserveSource), PreserveReferences = true)]
+[Map(typeof(Task5_PreserveSource), PreserveReferences = true)]
 public class Task5_PreserveDto { public int Id { get; set; } }
 
 public class Task5_ReverseSource { public int Id { get; set; } }
-[AutoMap(typeof(Task5_ReverseSource), ReverseMap = true)]
+[Map(typeof(Task5_ReverseSource), ReverseMap = true)]
 public class Task5_ReverseDto { public int Id { get; set; } }
 
 public class Task5_PreserveReverseSource { public int Id { get; set; } }
-[AutoMap(typeof(Task5_PreserveReverseSource), PreserveReferences = true, ReverseMap = true)]
+[Map(typeof(Task5_PreserveReverseSource), PreserveReferences = true, ReverseMap = true)]
 public class Task5_PreserveReverseDto { public int Id { get; set; } }
 
 public class AttributeMapSourceListSource { public int Id { get; set; } public string Name { get; set; } = ""; }
-[AutoMap(typeof(AttributeMapSourceListSource), MemberList = MemberList.Source)]
+[Map(typeof(AttributeMapSourceListSource), MemberList = MemberList.Source)]
 public class AttributeMapSourceListDto { public int Id { get; set; } public string Name { get; set; } = ""; }
 
-public class AutoMapAttributeEndToEndTests
+public class MapAttributeEndToEndTests
 {
     [Fact]
     public void AttributeMap_ConventionOnlyMember_Resolves_ViaAddMaps()

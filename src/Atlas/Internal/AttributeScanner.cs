@@ -5,7 +5,7 @@ using System.Runtime.ExceptionServices;
 namespace Atlas.Internal;
 
 /// <summary>
-/// Discovers <see cref="AutoMapAttribute"/>-decorated types in scanned assemblies and registers
+/// Discovers <see cref="MapAttribute"/>-decorated types in scanned assemblies and registers
 /// each into the configuration via the same fluent calls a hand-written profile would make.
 /// See <c>docs/Atlas-Design-AttributeConfig.md</c> §4.1 / §5.
 /// </summary>
@@ -43,7 +43,7 @@ internal static class AttributeScanner
             if (!IsAttributeMapCandidate(type))
                 continue;
 
-            ProcessAutoMapType(type, cfg, errors);
+            ProcessMapType(type, cfg, errors);
         }
 
         if (errors.Count > 0)
@@ -52,7 +52,7 @@ internal static class AttributeScanner
 
     /// <summary>
     /// True when <paramref name="t"/> is a top-level public non-abstract non-interface
-    /// non-nested non-enum class decorated with <see cref="AutoMapAttribute"/>.
+    /// non-nested non-enum class decorated with <see cref="MapAttribute"/>.
     /// Static classes (encoded as <c>IsAbstract &amp;&amp; IsSealed</c>) are excluded.
     /// </summary>
     public static bool IsAttributeMapCandidate(Type t)
@@ -61,22 +61,22 @@ internal static class AttributeScanner
             && t.IsPublic
             && !t.IsAbstract
             && !t.IsNested
-            && t.GetCustomAttribute<AutoMapAttribute>(inherit: false) is not null;
+            && t.GetCustomAttribute<MapAttribute>(inherit: false) is not null;
     }
 
     /// <summary>
-    /// Translates one [AutoMap]-decorated type into fluent calls. Validation (Task 3) is
+    /// Translates one [Map]-decorated type into fluent calls. Validation (Task 3) is
     /// applied first; invalid registrations accumulate errors and return early.
     /// CreateMap + member attribute application + class-level flags land in Tasks 5/6/7/8.
     /// </summary>
-    private static void ProcessAutoMapType(Type decoratedType, MapperConfigurationExpression cfg, List<ConfigurationError> errors)
+    private static void ProcessMapType(Type decoratedType, MapperConfigurationExpression cfg, List<ConfigurationError> errors)
     {
-        var attr = decoratedType.GetCustomAttribute<AutoMapAttribute>(inherit: false)!;
-        if (!ValidateAutoMapTarget(decoratedType, attr, errors))
+        var attr = decoratedType.GetCustomAttribute<MapAttribute>(inherit: false)!;
+        if (!ValidateMapTarget(decoratedType, attr, errors))
             return;
 
         var srcType = attr.SourceType;
-        var attributeOrigin = $"[AutoMap(typeof({srcType.Name}))] on {decoratedType.Name}";
+        var attributeOrigin = $"[Map(typeof({srcType.Name}))] on {decoratedType.Name}";
 
         // Check for duplicate before calling CreateMap so the conflict error names the
         // attribute as the incoming (new) registration origin — not a synthesised CreateMap<> call.
@@ -355,7 +355,7 @@ internal static class AttributeScanner
         };
     }
 
-    private static void ApplyClassLevelFlags(object mappingExpression, Type srcType, Type dstType, AutoMapAttribute attr)
+    private static void ApplyClassLevelFlags(object mappingExpression, Type srcType, Type dstType, MapAttribute attr)
     {
         var imappingExprClosed = typeof(Atlas.Configuration.IMappingExpression<,>).MakeGenericType(srcType, dstType);
 
@@ -377,11 +377,11 @@ internal static class AttributeScanner
     }
 
     /// <summary>
-    /// Validates the [AutoMap] decorated type and its source type against §6 rules 1-3.
+    /// Validates the [Map] decorated type and its source type against §6 rules 1-3.
     /// Adds a <see cref="ConfigurationError"/> for each violation and returns false if any
     /// violation is found. Returns true when the pair is valid.
     /// </summary>
-    private static bool ValidateAutoMapTarget(Type decoratedType, AutoMapAttribute attr, List<ConfigurationError> errors)
+    private static bool ValidateMapTarget(Type decoratedType, MapAttribute attr, List<ConfigurationError> errors)
     {
         var srcType = attr.SourceType;
         var dstType = decoratedType;
@@ -390,7 +390,7 @@ internal static class AttributeScanner
         if (dstType.IsGenericTypeDefinition || dstType.ContainsGenericParameters)
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] applied to open-generic type '{FormatTypeName(dstType)}'. " +
+                $"[Map] applied to open-generic type '{FormatTypeName(dstType)}'. " +
                 $"Use cfg.CreateMap(typeof(Source<>), typeof(Dest<>)) for open-generic registrations."));
             return false;
         }
@@ -399,7 +399,7 @@ internal static class AttributeScanner
         if (dstType.IsEnum)
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] applied to enum '{dstType.Name}'. Use cfg.CreateMap<TSrcEnum, {dstType.Name}>().MapByName() (or similar) for enum-to-enum mappings."));
+                $"[Map] applied to enum '{dstType.Name}'. Use cfg.CreateMap<TSrcEnum, {dstType.Name}>().MapByName() (or similar) for enum-to-enum mappings."));
             return false;
         }
 
@@ -407,7 +407,7 @@ internal static class AttributeScanner
         if (dstType.IsInterface)
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] applied to interface '{dstType.Name}'. Atlas cannot instantiate interfaces; use a concrete destination type."));
+                $"[Map] applied to interface '{dstType.Name}'. Atlas cannot instantiate interfaces; use a concrete destination type."));
             return false;
         }
 
@@ -415,7 +415,7 @@ internal static class AttributeScanner
         if (dstType is { IsAbstract: true, IsSealed: true })
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] applied to static type '{dstType.Name}'. Static types cannot be mapping destinations."));
+                $"[Map] applied to static type '{dstType.Name}'. Static types cannot be mapping destinations."));
             return false;
         }
 
@@ -423,7 +423,7 @@ internal static class AttributeScanner
         if (dstType.IsAbstract)
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] applied to abstract type '{dstType.Name}'. Atlas cannot instantiate abstract destinations."));
+                $"[Map] applied to abstract type '{dstType.Name}'. Atlas cannot instantiate abstract destinations."));
             return false;
         }
 
@@ -431,7 +431,7 @@ internal static class AttributeScanner
         if (srcType.IsGenericTypeDefinition)
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] on '{dstType.Name}' specifies open-generic source type '{FormatTypeName(srcType)}'. " +
+                $"[Map] on '{dstType.Name}' specifies open-generic source type '{FormatTypeName(srcType)}'. " +
                 $"Open generics use cfg.CreateMap(typeof(Source<>), typeof(Dest<>)) — " +
                 $"attribute syntax is not supported for open generics."));
             return false;
@@ -441,7 +441,7 @@ internal static class AttributeScanner
         if (DynamicShape.IsDynamicShape(srcType))
         {
             errors.Add(new(srcType, dstType, "(register)",
-                $"[AutoMap] on '{dstType.Name}' specifies a recognized dynamic shape ('{FormatTypeName(srcType)}'). " +
+                $"[Map] on '{dstType.Name}' specifies a recognized dynamic shape ('{FormatTypeName(srcType)}'). " +
                 $"Dynamic mapping is convention-only and requires no registration — remove the attribute and call mapper.Map<{dstType.Name}>(dictInstance) directly. " +
                 $"To explicitly register a non-dynamic mapping for this pair, use cfg.CreateMap<{FormatTypeName(srcType)}, {dstType.Name}>() in a profile."));
             return false;

@@ -96,7 +96,7 @@ public class SourceMemberAttributeBehaviorTests
 }
 
 public class SourceMemberFlatSource { public string OriginalName { get; set; } = ""; }
-[AutoMap(typeof(SourceMemberFlatSource))]
+[Map(typeof(SourceMemberFlatSource))]
 public class SourceMemberFlatDto
 {
     [SourceMember(nameof(SourceMemberFlatSource.OriginalName))]
@@ -105,7 +105,7 @@ public class SourceMemberFlatDto
 
 public class SourceMemberCustomer { public string Name { get; set; } = ""; }
 public class SourceMemberDottedSource { public SourceMemberCustomer Customer { get; set; } = new(); }
-[AutoMap(typeof(SourceMemberDottedSource))]
+[Map(typeof(SourceMemberDottedSource))]
 public class SourceMemberDottedDto
 {
     [SourceMember("Customer.Name")]
@@ -115,7 +115,7 @@ public class SourceMemberDottedDto
 public class SourceMemberDeepAddress { public string City { get; set; } = ""; }
 public class SourceMemberDeepCustomer { public SourceMemberDeepAddress Address { get; set; } = new(); }
 public class SourceMemberDeepSource { public SourceMemberDeepCustomer Customer { get; set; } = new(); }
-[AutoMap(typeof(SourceMemberDeepSource))]
+[Map(typeof(SourceMemberDeepSource))]
 public class SourceMemberDeepDto
 {
     [SourceMember("Customer.Address.City")]
@@ -123,7 +123,7 @@ public class SourceMemberDeepDto
 }
 
 public class SourceMemberBadPathSource { public SourceMemberCustomer Customer { get; set; } = new(); }
-[AutoMap(typeof(SourceMemberBadPathSource))]
+[Map(typeof(SourceMemberBadPathSource))]
 public class SourceMemberBadPathDto
 {
     [SourceMember("Customer.Missing")]
@@ -131,7 +131,7 @@ public class SourceMemberBadPathDto
 }
 
 public class SourceMemberIgnoreShortCircuitSource { public string OriginalName { get; set; } = ""; }
-[AutoMap(typeof(SourceMemberIgnoreShortCircuitSource))]
+[Map(typeof(SourceMemberIgnoreShortCircuitSource))]
 public class SourceMemberIgnoreShortCircuitDto
 {
     [Ignore]

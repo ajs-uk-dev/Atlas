@@ -14,9 +14,9 @@ namespace Atlas;
 /// <c>CreateMap</c> throws <see cref="AtlasConfigurationException"/> at registration time.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-public sealed class AutoMapAttribute : Attribute
+public sealed class MapAttribute : Attribute
 {
-    public AutoMapAttribute(Type sourceType)
+    public MapAttribute(Type sourceType)
     {
         ArgumentNullException.ThrowIfNull(sourceType);
         SourceType = sourceType;

@@ -83,16 +83,16 @@ public class AttributeProjectionTests
 }
 
 public class ProjectionAttrSource { public int Id { get; set; } public string Name { get; set; } = ""; }
-[AutoMap(typeof(ProjectionAttrSource))]
+[Map(typeof(ProjectionAttrSource))]
 public class ProjectionAttrDto { public int Id { get; set; } public string Name { get; set; } = ""; }
 
 public class ProjectionIgnoreSource { public int Id { get; set; } public string? Skipped { get; set; } }
-[AutoMap(typeof(ProjectionIgnoreSource))]
+[Map(typeof(ProjectionIgnoreSource))]
 public class ProjectionIgnoreDto { public int Id { get; set; } [Ignore] public string? Skipped { get; set; } }
 
 public class ProjectionDottedCustomer { public string Name { get; set; } = ""; }
 public class ProjectionDottedSource { public int Id { get; set; } public ProjectionDottedCustomer Customer { get; set; } = new(); }
-[AutoMap(typeof(ProjectionDottedSource))]
+[Map(typeof(ProjectionDottedSource))]
 public class ProjectionDottedDto
 {
     public int Id { get; set; }
@@ -100,7 +100,7 @@ public class ProjectionDottedDto
 }
 
 public class ProjectionNullSubSource { public int Id { get; set; } public string? MaybeName { get; set; } }
-[AutoMap(typeof(ProjectionNullSubSource))]
+[Map(typeof(ProjectionNullSubSource))]
 public class ProjectionNullSubDto
 {
     public int Id { get; set; }
@@ -110,5 +110,5 @@ public class ProjectionNullSubDto
 }
 
 public class ProjectionPreserveSource { public int Id { get; set; } }
-[AutoMap(typeof(ProjectionPreserveSource), PreserveReferences = true)]
+[Map(typeof(ProjectionPreserveSource), PreserveReferences = true)]
 public class ProjectionPreserveDto { public int Id { get; set; } }

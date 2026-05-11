@@ -119,7 +119,7 @@ public class NullSubstituteAttributeBehaviorTests
 }
 
 public class NullSubstituteStringSource { public string? Email { get; set; } }
-[AutoMap(typeof(NullSubstituteStringSource))]
+[Map(typeof(NullSubstituteStringSource))]
 public class NullSubstituteStringDto
 {
     [NullSubstitute("(no email)")]
@@ -127,7 +127,7 @@ public class NullSubstituteStringDto
 }
 
 public class NullSubstituteIntSource { public int? Count { get; set; } }
-[AutoMap(typeof(NullSubstituteIntSource))]
+[Map(typeof(NullSubstituteIntSource))]
 public class NullSubstituteIntDto
 {
     [NullSubstitute(0)]
@@ -135,7 +135,7 @@ public class NullSubstituteIntDto
 }
 
 public class NullSubstituteUnreachableSource { public int Count { get; set; } }   // non-nullable!
-[AutoMap(typeof(NullSubstituteUnreachableSource))]
+[Map(typeof(NullSubstituteUnreachableSource))]
 public class NullSubstituteUnreachableDto
 {
     [NullSubstitute(0)]
@@ -143,7 +143,7 @@ public class NullSubstituteUnreachableDto
 }
 
 public class NullSubstituteTypeMismatchSource { public int? Count { get; set; } }
-[AutoMap(typeof(NullSubstituteTypeMismatchSource))]
+[Map(typeof(NullSubstituteTypeMismatchSource))]
 public class NullSubstituteTypeMismatchDto
 {
     [NullSubstitute("not-an-int")]   // string is not assignable to int?
@@ -152,7 +152,7 @@ public class NullSubstituteTypeMismatchDto
 
 public class NullSubstituteWithSourceMemberCustomer { public string? Email { get; set; } }
 public class NullSubstituteWithSourceMemberSource { public NullSubstituteWithSourceMemberCustomer Customer { get; set; } = new(); }
-[AutoMap(typeof(NullSubstituteWithSourceMemberSource))]
+[Map(typeof(NullSubstituteWithSourceMemberSource))]
 public class NullSubstituteWithSourceMemberDto
 {
     [SourceMember("Customer.Email")]
@@ -161,7 +161,7 @@ public class NullSubstituteWithSourceMemberDto
 }
 
 public class NullSubstituteIgnoreShortCircuitSource { public string? Email { get; set; } }
-[AutoMap(typeof(NullSubstituteIgnoreShortCircuitSource))]
+[Map(typeof(NullSubstituteIgnoreShortCircuitSource))]
 public class NullSubstituteIgnoreShortCircuitDto
 {
     [Ignore]

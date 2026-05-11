@@ -7,7 +7,7 @@ namespace Atlas;
 /// </summary>
 /// <remarks>
 /// Has effect only when applied to a property of a class decorated with
-/// <see cref="AutoMapAttribute"/>. The validator rejects substitutes whose source-member
+/// <see cref="MapAttribute"/>. The validator rejects substitutes whose source-member
 /// type is non-nullable (the substitute would be unreachable) or whose substitute type is
 /// not assignable to the source-member type. The constructor itself rejects literal
 /// <c>null</c> as the substitute value.

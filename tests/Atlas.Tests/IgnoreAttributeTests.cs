@@ -49,9 +49,9 @@ public class IgnoreAttributeTests
     }
 
     [Fact]
-    public void Ignore_OnPropertyWithoutAutoMap_SilentlyNoOp()
+    public void Ignore_OnPropertyWithoutMap_SilentlyNoOp()
     {
-        // Class is NOT decorated with [AutoMap]; its [Ignore] property is silently ignored.
+        // Class is NOT decorated with [Map]; its [Ignore] property is silently ignored.
         var expr = new MapperConfigurationExpression();
         try { Atlas.Internal.AttributeScanner.Discover(typeof(IgnoreOrphanFixture).Assembly, expr); }
         catch (AtlasConfigurationException) { /* expected — bad fixtures from Task 3 */ }
@@ -76,7 +76,7 @@ public class IgnoreFixtureSource
     public string? Skipped { get; set; }
 }
 
-[AutoMap(typeof(IgnoreFixtureSource))]
+[Map(typeof(IgnoreFixtureSource))]
 public class IgnoreFixtureDto
 {
     public int Id { get; set; }
@@ -84,7 +84,7 @@ public class IgnoreFixtureDto
     public string? Skipped { get; set; }
 }
 
-[AutoMap(typeof(IgnoreFixtureSource), MemberList = MemberList.Destination)]
+[Map(typeof(IgnoreFixtureSource), MemberList = MemberList.Destination)]
 public class IgnoreFixtureValidationDto
 {
     public int Id { get; set; }

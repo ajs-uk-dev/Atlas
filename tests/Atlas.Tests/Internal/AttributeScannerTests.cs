@@ -15,7 +15,7 @@ public class AttributeScannerTests
     }
 
     [Fact]
-    public void IsAttributeMapCandidate_NoAutoMap_False()
+    public void IsAttributeMapCandidate_NoMap_False()
     {
         Assert.False(AttributeScanner.IsAttributeMapCandidate(typeof(UndecoratedFixture)));
     }
@@ -60,7 +60,7 @@ public class AttributeScannerTests
     // Top-level host class containing a nested-fixture
     public class HostForNested
     {
-        [AutoMap(typeof(NestedSource))]
+        [Map(typeof(NestedSource))]
         public class NestedAttributeFixture
         {
             public int X { get; set; }
@@ -76,7 +76,7 @@ public class AttributeScannerValidationTests
         var ex = Assert.Throws<AtlasConfigurationException>(() =>
             AttributeScanner.Discover(typeof(OpenGenericSourceFixture).Assembly, new MapperConfigurationExpression()));
         Assert.Contains(ex.Errors, e =>
-            e.Reason.Contains("[AutoMap]") && e.Reason.Contains("open-generic source"));
+            e.Reason.Contains("[Map]") && e.Reason.Contains("open-generic source"));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class AttributeScannerValidationTests
         var ex = Assert.Throws<AtlasConfigurationException>(() =>
             AttributeScanner.Discover(typeof(OpenGenericDestDto<>).Assembly, new MapperConfigurationExpression()));
         Assert.Contains(ex.Errors, e =>
-            e.Reason.Contains("[AutoMap]") && e.Reason.Contains("open-generic"));
+            e.Reason.Contains("[Map]") && e.Reason.Contains("open-generic"));
     }
 
     [Fact]
@@ -98,8 +98,8 @@ public class AttributeScannerValidationTests
     public void EnumDecorated_RejectedAtFilterLevel()
     {
         // Enums are technically not classes (Type.IsClass returns false for enums), so the
-        // candidate filter rejects. AutoMapAttribute's [AttributeUsage(Class)] also blocks
-        // [AutoMap] on enums at compile time. This test asserts the filter rejection.
+        // candidate filter rejects. MapAttribute's [AttributeUsage(Class)] also blocks
+        // [Map] on enums at compile time. This test asserts the filter rejection.
         var enumType = typeof(SomeEnum);
         Assert.False(AttributeScanner.IsAttributeMapCandidate(enumType));
     }
@@ -110,7 +110,7 @@ public class AttributeScannerValidationTests
         var ex = Assert.Throws<AtlasConfigurationException>(() =>
             AttributeScanner.Discover(typeof(DictionarySourceDto).Assembly, new MapperConfigurationExpression()));
         Assert.Contains(ex.Errors, e =>
-            e.Reason.Contains("[AutoMap]") && e.Reason.Contains("dynamic shape"));
+            e.Reason.Contains("[Map]") && e.Reason.Contains("dynamic shape"));
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class AttributeScannerValidationTests
         var ex = Assert.Throws<AtlasConfigurationException>(() =>
             AttributeScanner.Discover(typeof(ExpandoSourceDto).Assembly, new MapperConfigurationExpression()));
         Assert.Contains(ex.Errors, e =>
-            e.Reason.Contains("[AutoMap]") && e.Reason.Contains("dynamic shape"));
+            e.Reason.Contains("[Map]") && e.Reason.Contains("dynamic shape"));
     }
 
     [Fact]
@@ -160,19 +160,19 @@ public enum SomeEnum { A, B }
 
 public interface SomeInterfaceFixture { int X { get; } }
 
-[AutoMap(typeof(System.Collections.Generic.List<>))]
+[Map(typeof(System.Collections.Generic.List<>))]
 public class OpenGenericSourceFixture { public int X { get; set; } }   // open-generic SOURCE
 
-[AutoMap(typeof(SomeSource))]
+[Map(typeof(SomeSource))]
 public class OpenGenericDestDto<T> where T : class { public int X { get; set; } }   // open-generic DEST
 
-[AutoMap(typeof(System.Collections.Generic.Dictionary<string, object>))]
+[Map(typeof(System.Collections.Generic.Dictionary<string, object>))]
 public class DictionarySourceDto { public int X { get; set; } }
 
-[AutoMap(typeof(System.Dynamic.ExpandoObject))]
+[Map(typeof(System.Dynamic.ExpandoObject))]
 public class ExpandoSourceDto { public int X { get; set; } }
 
-[AutoMap(typeof(AttributeScannerTests.PublicSource))]
+[Map(typeof(AttributeScannerTests.PublicSource))]
 public class PublicAttributeFixture
 {
     public int X { get; set; }
@@ -183,13 +183,13 @@ public class UndecoratedFixture
     public int X { get; set; }
 }
 
-[AutoMap(typeof(AttributeScannerTests.AbstractSource))]
+[Map(typeof(AttributeScannerTests.AbstractSource))]
 public abstract class AbstractAttributeFixture
 {
     public int X { get; set; }
 }
 
-[AutoMap(typeof(AttributeScannerTests.InternalSource))]
+[Map(typeof(AttributeScannerTests.InternalSource))]
 internal class InternalAttributeFixture
 {
     public int X { get; set; }

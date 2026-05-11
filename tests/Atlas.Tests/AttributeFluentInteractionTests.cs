@@ -40,7 +40,7 @@ public class AttributeFluentInteractionTests
     public void AddAtlas_NoConfigure_RoutesAttributeDiscoveryThroughAddMaps()
     {
         // Exercises the no-configure overload services.AddAtlas(asm). Before the C1 fix this
-        // overload silently ignored [AutoMap] types because it bypassed AddMaps. The fix routes
+        // overload silently ignored [Map] types because it bypassed AddMaps. The fix routes
         // the scan through expression.AddMaps(assemblies) which invokes AttributeScanner.Discover.
         //
         // The test assembly contains Task 3 bad fixtures, so attribute discovery throws
@@ -65,7 +65,7 @@ public class AttributeFluentInteractionTests
                 // Profile registers (InteractionSrcB, InteractionDtoB) via fluent CreateMap.
                 // Nested profile — ProfileScanner skips it, so AddMaps below won't re-discover it.
                 c.AddProfile(new AttributeFluentInteractionFixtures.InteractionConflictProfile());
-                // AddMaps invokes the scanner which tries to register the same pair via [AutoMap].
+                // AddMaps invokes the scanner which tries to register the same pair via [Map].
                 c.AddMaps(typeof(InteractionDtoB).Assembly);
             });
         });
@@ -120,10 +120,10 @@ public class AttributeFluentInteractionTests
             });
         });
         var error = ex.Errors.First(e => e.Reason.Contains("registered twice"));
-        // Profile's CreateMap fluent registered first; attribute's [AutoMap] registered second.
+        // Profile's CreateMap fluent registered first; attribute's [Map] registered second.
         // Verify the existing-origin (profile fluent) precedes the new-origin (attribute) in the message.
         var fluentIdx = error.Reason.IndexOf("CreateMap<");
-        var attributeIdx = error.Reason.IndexOf("[AutoMap");
+        var attributeIdx = error.Reason.IndexOf("[Map");
         Assert.True(fluentIdx >= 0, $"Profile origin should appear in error: {error.Reason}");
         Assert.True(attributeIdx >= 0, $"Attribute origin should appear in error: {error.Reason}");
         Assert.True(fluentIdx < attributeIdx,
@@ -134,7 +134,7 @@ public class AttributeFluentInteractionTests
     public void AttributeReverseMap_CollidesWithExplicitReversePair_ThrowsAtlasConfigException()
     {
         // Profile declares the reverse pair (D_Holistic, S_Holistic) explicitly via fluent.
-        // Attribute on D_Holistic declares [AutoMap(typeof(S_Holistic), ReverseMap = true)],
+        // Attribute on D_Holistic declares [Map(typeof(S_Holistic), ReverseMap = true)],
         // which forces the scanner to emit .ReverseMap() that creates (D_Holistic, S_Holistic)
         // — collides with the explicit profile registration.
         var ex = Assert.Throws<AtlasConfigurationException>(() =>
@@ -153,11 +153,11 @@ public class AttributeFluentInteractionTests
 }
 
 public class InteractionSrcA { public int Id { get; set; } }
-[AutoMap(typeof(InteractionSrcA))]
+[Map(typeof(InteractionSrcA))]
 public class InteractionDtoA { public int Id { get; set; } }
 
 public class InteractionSrcB { public int Id { get; set; } }
-[AutoMap(typeof(InteractionSrcB))]
+[Map(typeof(InteractionSrcB))]
 public class InteractionDtoB { public int Id { get; set; } }
 
 // Nested so ProfileScanner (which skips nested types) does NOT discover it during AddMaps,
@@ -185,16 +185,16 @@ public class AttributeFluentInteractionFixtures
     {
         public HolisticReverseConflictProfile()
         {
-            // Explicit reverse pair (D_Holistic, S_Holistic) — collides with what AutoMap+ReverseMap produces.
+            // Explicit reverse pair (D_Holistic, S_Holistic) — collides with what [Map]+ReverseMap produces.
             CreateMap<D_Holistic, S_Holistic>();
         }
     }
 }
 
 public class InteractionGlobalTransformerSource { public string Name { get; set; } = ""; }
-[AutoMap(typeof(InteractionGlobalTransformerSource))]
+[Map(typeof(InteractionGlobalTransformerSource))]
 public class InteractionGlobalTransformerDto { public string Name { get; set; } = ""; }
 
 public class S_Holistic { public int X { get; set; } }
-[AutoMap(typeof(S_Holistic), ReverseMap = true)]
+[Map(typeof(S_Holistic), ReverseMap = true)]
 public class D_Holistic { public int X { get; set; } }

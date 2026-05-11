@@ -8,7 +8,7 @@ public class UseAsDataSourceCompatibilityTests
     [Fact]
     public void AttributeDeclaredTypeMap_WorksThroughWrapper()
     {
-        // [AutoMap] from PR #12 produces a normal TypeMap; wrapper doesn't care about origin.
+        // [Map] from PR #12 produces a normal TypeMap; wrapper doesn't care about origin.
         // Build cfg with explicit registration to avoid relying on assembly scan (cleaner).
         var cleanCfg = new MapperConfiguration(c => c.CreateMap<UEDS_AttrSrc, UEDS_AttrDto>());
 
@@ -131,7 +131,7 @@ public class UseAsDataSourceCompatibilityTests
     }
 }
 
-[AutoMap(typeof(UEDS_AttrSrc))]
+[Map(typeof(UEDS_AttrSrc))]
 public class UEDS_AttrDto { public int Id { get; set; } public string Name { get; set; } = ""; }
 public class UEDS_AttrSrc { public int Id { get; set; } public string Name { get; set; } = ""; }
 
