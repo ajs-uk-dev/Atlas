@@ -1,9 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <PackageId>OGToolz.Atlas.Extensions.DependencyInjection</PackageId>
+    <Description>Microsoft.Extensions.DependencyInjection integration for the Atlas mapper. Adds AddAtlas() extension methods with assembly scanning for MapperProfile subclasses.</Description>
+    <PackageTags>mapping;object-mapping;dotnet;dto;mapper;dependency-injection;di</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Atlas\Atlas.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
+
 </Project>

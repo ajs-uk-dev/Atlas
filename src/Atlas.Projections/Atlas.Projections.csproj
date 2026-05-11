@@ -1,10 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <PackageId>OGToolz.Atlas.Projections</PackageId>
-    <Description>LINQ-translatable projection (ProjectTo) for the Atlas mapper.</Description>
+    <Description>LINQ-translatable projection (ProjectTo) and expression translation (UseAsDataSource) for the Atlas mapper. Designed for EF Core and other IQueryable providers.</Description>
+    <PackageTags>mapping;object-mapping;dotnet;dto;mapper;linq;efcore;iqueryable;projection</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Atlas\Atlas.csproj" />
     <InternalsVisibleTo Include="Atlas.Projections.Tests" />
   </ItemGroup>
+
 </Project>

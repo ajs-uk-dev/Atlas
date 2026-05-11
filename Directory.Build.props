@@ -11,4 +11,27 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
+
+  <!-- Shared NuGet packaging metadata. Applies to every publishable project;
+       test/benchmark projects opt out with <IsPackable>false</IsPackable>. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+    <Version>1.0.0</Version>
+    <Authors>Anthropic (Claude Code)</Authors>
+    <PackageProjectUrl>https://github.com/ajs-uk-dev/Atlas</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ajs-uk-dev/Atlas</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <PackageReference Include="Microsoft.SourceLink.GitHub">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
 </Project>
