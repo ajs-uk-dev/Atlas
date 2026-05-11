@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Atlas.Projections</PackageId>
+    <PackageId>OGToolz.Atlas.Projections</PackageId>
     <Description>LINQ-translatable projection (ProjectTo) for the Atlas mapper.</Description>
   </PropertyGroup>
   <ItemGroup>

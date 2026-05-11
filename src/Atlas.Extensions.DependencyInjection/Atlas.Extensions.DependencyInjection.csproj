@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Atlas.Extensions.DependencyInjection</PackageId>
+    <PackageId>OGToolz.Atlas.Extensions.DependencyInjection</PackageId>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Atlas\Atlas.csproj" />
