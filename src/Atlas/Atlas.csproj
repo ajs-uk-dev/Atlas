@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>Atlas</PackageId>
+    <PackageId>OGToolz.Atlas</PackageId>
     <Version>1.0.0</Version>
     <Authors>Anthropic (Claude Code)</Authors>
     <Description>A fluent, high-performance object-to-object mapper for .NET.</Description>
