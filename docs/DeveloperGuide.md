@@ -478,6 +478,24 @@ public class Order { public List<OrderLine> Lines { get; set; } = new(); }
 public class OrderDto { public List<OrderLineDto> Lines { get; init; } = new(); }
 ```
 
+### Top-level collection mapping
+
+You can map a collection directly — you do **not** need a `CreateMap` on the collection pair, only on the element pair:
+
+```csharp
+CreateMap<Order, OrderDto>();   // element map only
+
+// All of these work with just the element map registered:
+List<OrderDto> dtos   = mapper.Map<List<OrderDto>>(orders);          // single-type-arg overload
+OrderDto[]     array  = mapper.Map<OrderDto[]>(orders);
+IEnumerable<OrderDto> seq = mapper.Map<IEnumerable<OrderDto>>(orders);
+List<OrderDto> dtos2  = mapper.Map<List<Order>, List<OrderDto>>(orders); // typed overload
+```
+
+Atlas detects that both sides are collections and maps element-by-element through the element typemap (the same machinery used for nested collection properties). A top-level call always produces a **new** collection — `Map<List<int>>(list)` returns a fresh list, not the source. If the element pair isn't registered (and the element types differ), the per-element map throws the usual `InvalidOperationException: No map registered for ...`.
+
+`Dictionary<K, V>` is not auto-mapped at the top level — register the dictionary pair explicitly, or map it as a nested property.
+
 ### Dictionaries
 
 ```csharp
@@ -1173,6 +1191,23 @@ public class OrderDto
 services.AddAtlas(typeof(OrderDto).Assembly);
 // Discovers OrderDto via [Map]; mapping is convention + member-attribute driven.
 ```
+
+### Type accessibility
+
+A `[Map]`-decorated type must be **public** so generated mapping code can reach it. Both of these are discovered:
+
+```csharp
+[Map(typeof(Order))]
+public class OrderDto { ... }                 // top-level public
+
+public class Dtos                             // public host
+{
+    [Map(typeof(Order))]
+    public class OrderDto { ... }             // public nested in public — also discovered
+}
+```
+
+A decorated type that is **not** publicly accessible (`internal`/`private`, or public nested inside a non-public type) raises a clear `AtlasConfigurationException` at scan time naming the offending type — it is no longer silently skipped. Make it public, or register the pair via a fluent profile instead.
 
 ### Class-level options
 

@@ -21,9 +21,11 @@ public class AttributeScannerTests
     }
 
     [Fact]
-    public void IsAttributeMapCandidate_NestedDecorated_False()
+    public void IsAttributeMapCandidate_NestedPublicDecorated_True()
     {
-        Assert.False(AttributeScanner.IsAttributeMapCandidate(
+        // A public type nested in a public type is reachable by generated mapping code,
+        // so it is now a valid attribute-map candidate (previously silently excluded).
+        Assert.True(AttributeScanner.IsAttributeMapCandidate(
             typeof(AttributeScannerTests.HostForNested.NestedAttributeFixture)));
     }
 
@@ -35,6 +37,24 @@ public class AttributeScannerTests
         Assert.NotNull(type);
         Assert.False(AttributeScanner.IsAttributeMapCandidate(type!));
     }
+
+    // ---- Accessibility helper ----
+
+    [Fact]
+    public void IsPubliclyAccessible_TopLevelPublic_True()
+        => Assert.True(AttributeScanner.IsPubliclyAccessible(typeof(PublicAttributeFixture)));
+
+    [Fact]
+    public void IsPubliclyAccessible_TopLevelInternal_False()
+        => Assert.False(AttributeScanner.IsPubliclyAccessible(typeof(InternalHost)));
+
+    [Fact]
+    public void IsPubliclyAccessible_PublicNestedInPublic_True()
+        => Assert.True(AttributeScanner.IsPubliclyAccessible(typeof(HostForNested.NestedAttributeFixture)));
+
+    [Fact]
+    public void IsPubliclyAccessible_PublicNestedInInternal_False()
+        => Assert.False(AttributeScanner.IsPubliclyAccessible(typeof(InternalHost.PublicNestedInInternal)));
 
     [Fact]
     public void IsAttributeMapCandidate_AbstractDecorated_False()
@@ -65,6 +85,12 @@ public class AttributeScannerTests
         {
             public int X { get; set; }
         }
+    }
+
+    // Internal host with a public nested type — public-nested-in-internal is NOT accessible.
+    internal class InternalHost
+    {
+        public class PublicNestedInInternal { public int X { get; set; } }
     }
 }
 
@@ -152,6 +178,16 @@ public class AttributeScannerValidationTests
         var dictError = ex.Errors.First(e => e.Reason.Contains("dynamic shape") && e.SourceType == typeof(System.Collections.Generic.Dictionary<string, object>));
         Assert.Contains("Dictionary<string, object>", dictError.Reason);
         Assert.DoesNotContain("Dictionary<String, Object>", dictError.Reason);
+    }
+
+    [Fact]
+    public void NonPublicDecorated_RejectedWithMustBePublicMessage()
+    {
+        // The internal [Map] fixture used to be silently skipped; it now surfaces a clear error.
+        var ex = Assert.Throws<AtlasConfigurationException>(() =>
+            AttributeScanner.Discover(typeof(AttributeScannerTests).Assembly, new MapperConfigurationExpression()));
+        Assert.Contains(ex.Errors, e =>
+            e.Reason.Contains("must be public") && e.Reason.Contains("InternalAttributeFixture"));
     }
 }
 

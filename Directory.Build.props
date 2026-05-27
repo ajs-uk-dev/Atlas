@@ -15,7 +15,7 @@
   <!-- Shared NuGet packaging metadata. Applies to every publishable project;
        test/benchmark projects opt out with <IsPackable>false</IsPackable>. -->
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>Anthropic (Claude Code)</Authors>
     <PackageProjectUrl>https://github.com/ajs-uk-dev/Atlas</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ajs-uk-dev/Atlas</RepositoryUrl>

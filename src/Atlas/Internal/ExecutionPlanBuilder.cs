@@ -617,7 +617,7 @@ internal static class ExecutionPlanBuilder
 
     // ---- Type helpers ----
 
-    private static bool IsCollection(Type t)
+    internal static bool IsCollection(Type t)
     {
         if (t == typeof(string)) return false;
         if (t.IsArray) return true;
@@ -629,7 +629,7 @@ internal static class ExecutionPlanBuilder
     private static bool IsDictionary(Type t) =>
         t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>);
 
-    private static Type? GetEnumerableElementType(Type t)
+    internal static Type? GetEnumerableElementType(Type t)
     {
         if (t.IsArray) return t.GetElementType();
         if (t.IsGenericType)
