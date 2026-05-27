@@ -29,8 +29,10 @@ internal static class AttributeScanner
         nameof(Atlas.Configuration.IMemberConfigurationExpression<object, object, object>.NullSubstitute);
 
     /// <summary>
-    /// Top-level entry point. Enumerates public top-level non-abstract decorated types and
-    /// processes each. Errors are accumulated; a fatal duplicate-pair throws immediately.
+    /// Top-level entry point. Enumerates every <see cref="MapAttribute"/>-decorated type and
+    /// processes each. Decorated types that are not publicly accessible raise a clear error
+    /// rather than being silently skipped; nested PUBLIC types are discovered and mapped.
+    /// Errors are accumulated; a fatal duplicate-pair throws immediately.
     /// </summary>
     public static void Discover(Assembly assembly, MapperConfigurationExpression cfg)
     {
@@ -40,8 +42,20 @@ internal static class AttributeScanner
         var errors = new List<ConfigurationError>();
         foreach (var type in assembly.GetTypes())
         {
-            if (!IsAttributeMapCandidate(type))
+            var attr = type.GetCustomAttribute<MapAttribute>(inherit: false);
+            if (attr is null)
+                continue; // undecorated — ignore (the vast majority of types)
+
+            if (!IsPubliclyAccessible(type))
+            {
+                // Previously these were silently skipped. Surface a clear error so a [Map] that
+                // can never be discovered doesn't vanish without explanation.
+                errors.Add(new(attr.SourceType, type, "(register)",
+                    $"[Map] on '{type.Name}' — attribute-mapped types must be public. " +
+                    $"'{type.Name}' is {(type.IsNested ? "a non-public nested type" : "non-public")}; " +
+                    $"make it (and any enclosing types) public, or register the pair via a profile with cfg.CreateMap."));
                 continue;
+            }
 
             ProcessMapType(type, cfg, errors);
         }
@@ -51,17 +65,33 @@ internal static class AttributeScanner
     }
 
     /// <summary>
-    /// True when <paramref name="t"/> is a top-level public non-abstract non-interface
-    /// non-nested non-enum class decorated with <see cref="MapAttribute"/>.
-    /// Static classes (encoded as <c>IsAbstract &amp;&amp; IsSealed</c>) are excluded.
+    /// True when <paramref name="t"/> is a non-abstract class decorated with
+    /// <see cref="MapAttribute"/> that is publicly reachable by generated mapping code —
+    /// i.e. top-level public OR a public type nested in public type(s). Static classes
+    /// (encoded as <c>IsAbstract &amp;&amp; IsSealed</c>) are excluded via the abstract check.
     /// </summary>
     public static bool IsAttributeMapCandidate(Type t)
     {
         return t.IsClass
-            && t.IsPublic
             && !t.IsAbstract
-            && !t.IsNested
+            && IsPubliclyAccessible(t)
             && t.GetCustomAttribute<MapAttribute>(inherit: false) is not null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="t"/> and every enclosing type are public — i.e. the type is
+    /// reachable by generated mapping code. Covers top-level public types and public types
+    /// nested (at any depth) inside public types.
+    /// </summary>
+    internal static bool IsPubliclyAccessible(Type t)
+    {
+        while (t.IsNested)
+        {
+            if (!t.IsNestedPublic)
+                return false;
+            t = t.DeclaringType!;
+        }
+        return t.IsPublic;
     }
 
     /// <summary>

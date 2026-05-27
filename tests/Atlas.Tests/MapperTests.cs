@@ -209,6 +209,94 @@ public class MapperTests
         var dst = mapper.Map<MtNullableSrc, MtNullableDst>(new MtNullableSrc { Value = null });
         Assert.Null(dst.Value);
     }
+
+    // ---- Top-level collection auto-mapping (only the element map is registered) ----
+
+    [Fact]
+    public void Map_TopLevelListToList_AutoMapsElements()
+    {
+        // The consumer's exact scenario: single-type-arg overload, no CreateMap on the List pair.
+        var mapper = BuildMapper(c => c.CreateMap<MtCustomerSrc, MtCustomerDst>());
+
+        var src = new List<MtCustomerSrc> { new() { Name = "A" }, new() { Name = "B" } };
+        var dst = mapper.Map<List<MtCustomerDst>>(src);
+
+        Assert.Equal(2, dst.Count);
+        Assert.Equal("A", dst[0].Name);
+        Assert.Equal("B", dst[1].Name);
+    }
+
+    [Fact]
+    public void Map_TopLevelListToArray_AutoMapsElements()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtCustomerSrc, MtCustomerDst>());
+
+        var src = new List<MtCustomerSrc> { new() { Name = "x" }, new() { Name = "y" } };
+        var dst = mapper.Map<MtCustomerDst[]>(src);
+
+        Assert.Equal(2, dst.Length);
+        Assert.Equal("x", dst[0].Name);
+        Assert.Equal("y", dst[1].Name);
+    }
+
+    [Fact]
+    public void Map_TopLevelListToIEnumerable_AutoMapsElements()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtCustomerSrc, MtCustomerDst>());
+
+        var src = new List<MtCustomerSrc> { new() { Name = "only" } };
+        var dst = mapper.Map<IEnumerable<MtCustomerDst>>(src);
+
+        Assert.Equal(new[] { "only" }, dst.Select(d => d.Name));
+    }
+
+    [Fact]
+    public void Map_TopLevelTypedOverload_ListToList_AutoMapsElements()
+    {
+        // Two-type-arg overload, again with no explicit List<,> registration.
+        var mapper = BuildMapper(c => c.CreateMap<MtCustomerSrc, MtCustomerDst>());
+
+        var src = new List<MtCustomerSrc> { new() { Name = "P" }, new() { Name = "Q" } };
+        var dst = mapper.Map<List<MtCustomerSrc>, List<MtCustomerDst>>(src);
+
+        Assert.Equal(2, dst.Count);
+        Assert.Equal("Q", dst[1].Name);
+    }
+
+    [Fact]
+    public void Map_TopLevelListOfIdentical_ReturnsNewList()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtFlatSrc, MtFlatDst>()); // unrelated map
+
+        var src = new List<int> { 1, 2, 3 };
+        var dst = mapper.Map<List<int>>(src);
+
+        Assert.Equal(src, dst);
+        Assert.NotSame(src, dst); // new collection, not aliased
+    }
+
+    [Fact]
+    public void Map_TopLevelEmptyList_ReturnsEmpty()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtCustomerSrc, MtCustomerDst>());
+
+        var dst = mapper.Map<List<MtCustomerDst>>(new List<MtCustomerSrc>());
+
+        Assert.Empty(dst);
+    }
+
+    [Fact]
+    public void Map_TopLevelListUnregisteredElement_Throws()
+    {
+        var mapper = BuildMapper(c => c.CreateMap<MtFlatSrc, MtFlatDst>()); // element map NOT registered
+
+        var src = new List<MtCustomerSrc> { new() { Name = "A" } };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => mapper.Map<List<MtCustomerDst>>(src));
+        Assert.Contains("No map registered", ex.Message);
+        Assert.Contains("MtCustomerSrc", ex.Message);
+        Assert.Contains("MtCustomerDst", ex.Message);
+    }
 }
 
 // ---- Test fixtures ----

@@ -162,4 +162,25 @@ public class MapAttributeEndToEndTests
         Assert.Equal(1, dto.Id);
         Assert.Equal("test", dto.Name);
     }
+
+    [Fact]
+    public void AttributeMap_NestedPublicType_IsDiscoveredAndMapped_ViaAddMaps()
+    {
+        // A public [Map] type nested in a public host is now discovered by the scan and mapped.
+        var cfg = new MapperConfiguration(c =>
+        {
+            try { c.AddMaps(typeof(NestedMapHost.NestedMapDto).Assembly); }
+            catch (AtlasConfigurationException) { }
+        });
+        var mapper = cfg.CreateMapper();
+        var dto = mapper.Map<NestedMapHost.NestedMapDto>(new NestedMapSource { Id = 42 });
+        Assert.Equal(42, dto.Id);
+    }
+}
+
+public class NestedMapSource { public int Id { get; set; } }
+public class NestedMapHost
+{
+    [Map(typeof(NestedMapSource))]
+    public class NestedMapDto { public int Id { get; set; } }
 }

@@ -10,6 +10,18 @@ plus a delegate invocation. No reflection on the hot path.
 
 - **.NET 10** or later (uses preview language features and `System.Threading.Lock`).
 
+## Packages
+
+Atlas ships as three packages. The core package contains the mapper itself; DI registration and LINQ projection live in separate packages.
+
+| Feature | Package | Install |
+| --- | --- | --- |
+| Core mapping (`IMapper`, `Map<>()`, profiles, `[Map]` attributes) | **OGToolz.Atlas** | `dotnet add package OGToolz.Atlas` |
+| DI registration (`AddAtlas(...)`) | **OGToolz.Atlas.Extensions.DependencyInjection** | `dotnet add package OGToolz.Atlas.Extensions.DependencyInjection` |
+| LINQ / EF Core projection (`ProjectTo`, `UseAsDataSource`) | **OGToolz.Atlas.Projections** | `dotnet add package OGToolz.Atlas.Projections` |
+
+> **`AddAtlas()` and `ProjectTo` are not in the core package** — install the package shown above. Each sibling package depends on `OGToolz.Atlas`, so installing one pulls in the core automatically.
+
 ## Quick start
 
 ```csharp
@@ -37,8 +49,7 @@ OrderDto dto = mapper.Map<OrderEntity, OrderDto>(entity);
 
 ## Dependency injection
 
-The `Atlas.Extensions.DependencyInjection` package adds the standard registration
-shape:
+Install **`OGToolz.Atlas.Extensions.DependencyInjection`** (separate package — see [Packages](#packages)). It adds the standard registration shape:
 
 ```csharp
 using Atlas;
@@ -52,7 +63,7 @@ violations throw `AtlasConfigurationException` at registration time.
 
 ## Queryable projection (`Atlas.Projections`)
 
-Optional package that translates a configured map into a LINQ expression and applies it as a `Select` over an `IQueryable`. Designed for EF Core read paths.
+Install **`OGToolz.Atlas.Projections`** (separate package — see [Packages](#packages)). It translates a configured map into a LINQ expression and applies it as a `Select` over an `IQueryable`. Designed for EF Core read paths.
 
 ```csharp
 using Atlas.Projections;
@@ -466,6 +477,10 @@ services.AddAtlas(typeof(OrderDto).Assembly);
 
 Attributes can't carry lambdas. Use a fluent profile (or a fluent `cfg.CreateMap<>` call) for: `MapFrom(expr)`, `Condition` / `PreCondition`, `BeforeMap` / `AfterMap` lambdas or typed actions, `ConvertUsing`, `AddTransform`, `Include` / `IncludeBase`, `ForCtorParam`, `ForPath`, factory-form `NullSubstitute`, per-value enum overrides.
 
+### Discovery rule
+
+A `[Map]`-decorated type must be **public** — either top-level or nested inside public type(s). Non-public (`internal`/`private`) decorated types raise a clear `AtlasConfigurationException` at scan time rather than being silently skipped. Public nested types (e.g. a DTO nested in a public host class) are discovered and mapped.
+
 ### Conflict rule
 
 A `(TSource, TDestination)` pair must be declared exactly once. Declaring the same pair via both an attribute and a fluent `CreateMap` throws at config-build naming both registration sites. The same rule applies to two fluent `CreateMap` calls for the same pair (behavior change in v2 — see Migration notes below).
@@ -674,7 +689,7 @@ See `docs/Atlas-Design-ReferenceHandling.md` for the full specification.
 | `MapFrom(expression)` / `MapFrom(constant)` | Source override or literal value. |
 | Constructor / record / `init` / `required` mapping | Constructor parameters always match case-insensitively. |
 | `ConvertUsing<T>()` and lambda converters | Whole-type custom conversion. |
-| Collections | `List<T>`, `IList<T>`, `ICollection<T>`, `IEnumerable<T>`, `T[]`. |
+| Collections | `List<T>`, `IList<T>`, `ICollection<T>`, `IEnumerable<T>`, `T[]`. Top-level `mapper.Map<List<TDst>>(srcList)` auto-maps element-by-element when the element map `TSrc → TDst` is registered — no explicit collection `CreateMap` needed. |
 | `Dictionary<K,V>` | Element-by-element mapping. |
 | Update-in-place | `mapper.Map(source, existingDestination)`. |
 | Validation | `AssertConfigurationIsValid()` returns every error in one exception. |

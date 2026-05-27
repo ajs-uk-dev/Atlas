@@ -30,6 +30,35 @@ internal static class MappingInvoker
             return ((Func<TSource, MappingContext?, TDestination>)del)(source, ctx);
         }
 
+        // Top-level collection auto-map: both sides are collections (not string, not dictionary)
+        // and no explicit collection map is registered. Map element-by-element via the same helpers
+        // the nested-property codegen uses. The element map (or identity) is resolved per element
+        // inside InvokeToList/InvokeToArray, so List<S> -> List<D> works iff S -> D is registered
+        // (or S == D). Runs before the identity short-circuit so List<T> -> List<T> yields a NEW
+        // collection rather than aliasing the source. Mirrors AutoMapper.
+        if (ExecutionPlanBuilder.IsCollection(typeof(TSource)) && ExecutionPlanBuilder.IsCollection(typeof(TDestination)))
+        {
+            var srcElem = ExecutionPlanBuilder.GetEnumerableElementType(typeof(TSource))!;
+            var dstElem = ExecutionPlanBuilder.GetEnumerableElementType(typeof(TDestination))!;
+            var helperName = typeof(TDestination).IsArray
+                ? nameof(InvokeToArray)
+                : nameof(InvokeToList);
+            var helper = typeof(MappingInvoker)
+                .GetMethod(helperName, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
+                .MakeGenericMethod(srcElem, dstElem);
+            try
+            {
+                return (TDestination)helper.Invoke(null, new object?[] { registry, source, ctx })!;
+            }
+            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException is not null)
+            {
+                // Surface the element-level failure (e.g. "No map registered for ...") rather than
+                // the reflection wrapper, preserving its original stack trace.
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tie.InnerException).Throw();
+                throw; // unreachable
+            }
+        }
+
         // No map registered. Identity short-circuit covers nested-call sites (typically primitives
         // appearing as collection/dictionary elements where the user didn't register an explicit map).
         // Allocation-free via Unsafe.As<,> for both reference and value types.
