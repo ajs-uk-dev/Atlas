@@ -7,6 +7,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Atlas.Projections\Atlas.Projections.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Promotes the transitive SQLitePCLRaw.lib.e_sqlite3 to top-level so the patched 3.50.3
+         version pinned in Directory.Packages.props overrides EF Core's vulnerable 2.1.11. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
