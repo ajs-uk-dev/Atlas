@@ -8,7 +8,7 @@ plus a delegate invocation. No reflection on the hot path.
 
 ## Requirements
 
-- **.NET 10** or later (uses preview language features and `System.Threading.Lock`).
+- **.NET 10** or later (targets `net10.0`; uses `System.Threading.Lock`).
 
 ## Packages
 
