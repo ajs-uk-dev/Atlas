@@ -1,8 +1,10 @@
-# Publishes the OGToolz.Atlas* packages to nuget.org using Trusted Publishing (OIDC).
-# No API key is stored: NuGet/login exchanges the GitHub OIDC token for a 1-hour key.
+# Builds and tests every push to main, and publishes the OGToolz.Atlas* packages to
+# nuget.org when <Version> in Directory.Build.props is not yet on nuget.org.
+# Publishing uses Trusted Publishing (OIDC): NuGet/login exchanges the GitHub OIDC
+# token for a 1-hour API key, so no API key is stored.
 #
-# Release: bump <Version> in Directory.Build.props, commit, then push a matching tag:
-#   git tag v1.2.3 && git push origin v1.2.3
+# Release: bump <Version> in Directory.Build.props, commit and push to main.
+# A v<Version> tag is created on the published commit.
 #
 # The nuget.org trusted publishing policy must match: owner ajs-uk-dev, repo Atlas,
 # workflow file publish.yml, environment release.
@@ -10,20 +12,26 @@ name: Publish to NuGet
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-      id-token: write # required for the OIDC token exchange with nuget.org
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
 
     steps:
       - uses: actions/checkout@v7
@@ -32,13 +40,20 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Check whether this version is already on nuget.org
+        id: version
         run: |
           version=$(dotnet msbuild src/Atlas/Atlas.csproj -getProperty:Version)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$version</Version> in Directory.Build.props"
-            exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          publish=false
+          for id in ogtoolz.atlas ogtoolz.atlas.projections ogtoolz.atlas.extensions.dependencyinjection; do
+            if ! curl -sf "https://api.nuget.org/v3-flatcontainer/$id/index.json" | grep -q "\"${version,,}\""; then
+              publish=true
+            fi
+          done
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          if [ "$publish" = "false" ]; then
+            echo "::notice::Version $version is already on nuget.org; skipping publish. Bump <Version> in Directory.Build.props to release."
           fi
 
       - name: Build
@@ -49,6 +64,30 @@ jobs:
 
       - name: Pack
         run: dotnet pack -c Release --no-build -o artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: artifacts/
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # create the version tag
+      id-token: write # required for the OIDC token exchange with nuget.org
+
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: artifacts
 
       - name: NuGet login (OIDC → temporary API key)
         uses: NuGet/login@v1
@@ -63,7 +102,13 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: packages
-          path: artifacts/
+      - name: Tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.build.outputs.version }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA"
+          fi
